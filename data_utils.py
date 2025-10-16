@@ -1,0 +1,262 @@
+import glob
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import cv2
+import torch
+from torch.utils.data import Dataset
+import torch.nn.functional as F
+
+
+DEFAULT_DATA_DIR = "/home/parth/snaak/snaak_data/data_parth"
+WINDOW_SIZE = 40  # pixels
+
+
+# Bin dimensions
+BIN_WIDTH_M = 0.140
+BIN_LENGTH_M = 0.240
+BIN_HEIGHT = 0.046
+BIN_WIDTH_PIX = 330
+BIN_LENGTH_PIX = 195
+CAM2BIN_DIST_MM = 325
+
+# For cropping the bin from rgb and depth image
+CROP_XMIN = 270
+CROP_XMAX = 465
+CROP_YMIN = 0
+CROP_YMAX = 330
+
+########################################################
+# Copy of the sample points function in granular_grasp_dc.py
+########################################################
+
+# BIN_WIDTH = 0.140
+# BIN_LENGTH = 0.240
+# BIN_DEPTH = 0.045
+
+# END_EFFECTOR_RADIUS = 0.06
+
+# def sample_point(self, zmin, zmax, depth_image):
+#     # TODO: Update this for granular grasping
+#     xmin = -BIN_WIDTH / 2 + END_EFFECTOR_RADIUS
+#     xmax = BIN_WIDTH / 2 - END_EFFECTOR_RADIUS
+
+#     ymin = -BIN_LENGTH / 2 + END_EFFECTOR_RADIUS
+#     ymax = BIN_LENGTH / 2 - END_EFFECTOR_RADIUS
+
+#     x = random.uniform(xmin, xmax)
+#     y = random.uniform(ymin, ymax)
+
+#     z = self.get_z_from_depth(x, y, zmin, zmax, depth_image)
+
+#     return (x, y, z)
+######################## End of copy ####################
+
+
+class CoordConverter:
+    def __init__(
+        self,
+        bin_width_m=BIN_WIDTH_M,
+        bin_length_m=BIN_LENGTH_M,
+        bin_height_m=BIN_HEIGHT,
+        bin_width_pix=BIN_WIDTH_PIX,
+        bin_length_pix=BIN_LENGTH_PIX,
+    ):
+        self.bin_width_m = bin_width_m
+        self.bin_length_m = bin_length_m
+        self.bin_height_m = bin_height_m
+        self.bin_width_pix = bin_width_pix
+        self.bin_length_pix = bin_length_pix
+
+    def m_to_pix(self, x_m, y_m):
+        x_pix = int(x_m * self.bin_width_pix / self.bin_width_m)
+        y_pix = int(y_m * self.bin_length_pix / self.bin_length_m)
+        return x_pix, y_pix
+
+    def pix_to_m(self, x_pix, y_pix):
+        x_m = x_pix * self.bin_width_m / self.bin_width_pix
+        y_m = y_pix * self.bin_length_m / self.bin_length_pix
+        return x_m, y_m
+
+    def action_xy_to_pix(self, action_x_m, action_y_m, img_w, img_h):
+        x_disp_pix, y_disp_pix = self.m_to_pix(action_x_m, action_y_m)
+        # print(f"x_disp_pix: {x_disp_pix}, y_disp_pix: {y_disp_pix}")
+        action_x_pix = img_w // 2 - x_disp_pix
+        action_y_pix = img_h // 2 - y_disp_pix
+        # print("Img center x, y: ", img_w // 2, img_h // 2)
+        # print(f"action_x_pix: {action_x_pix}, action_y_pix: {action_y_pix}")
+        return (action_x_pix, action_y_pix)
+
+
+class GraspDataset(Dataset):
+    def __init__(self, data_dir=DEFAULT_DATA_DIR):
+        super().__init__()
+        self.data_dir = data_dir
+        self.coord_converter = CoordConverter()
+
+        self.rgb_images = []
+        self.depth_images = []
+        self.start_weights = []
+        self.final_weights = []
+        self.z_below_surface = []
+        self.actions = []
+
+        self.npz_files = glob.glob(
+            os.path.join(self.data_dir, "**/*.npz"), recursive=True
+        )
+        for npz_file in self.npz_files:
+            data = np.load(npz_file, allow_pickle=True)
+            self.rgb_images.append(data["rgb"])
+            self.depth_images.append(data["depth"])
+            self.start_weights.append(data["start_weight"])
+            self.final_weights.append(data["final_weight"])
+            self.z_below_surface.append(data["z_below_surface"])
+            self.actions.append(data["a1"])
+
+    def __crop_rgbd_bin(self, rgb, depth):
+        cropped_rgb = rgb[CROP_YMIN:CROP_YMAX, CROP_XMIN:CROP_XMAX, :]
+        cropped_depth = depth[CROP_YMIN:CROP_YMAX, CROP_XMIN:CROP_XMAX]
+        return cropped_rgb, cropped_depth
+
+    def __crop_rgbd_patch(self, action, rgb, depth, rgb_shape):
+        img_h, img_w, _ = rgb_shape
+
+        # Pad the rgb image and the depth image with zeros
+        pad_width = WINDOW_SIZE // 2
+        pad = WINDOW_SIZE // 2
+        rgb_padded = np.pad(
+            rgb,
+            ((pad, pad), (pad, pad), (0, 0)),
+            mode="constant",
+            constant_values=0,
+        )
+        depth_padded = np.pad(
+            depth,
+            ((pad, pad), (pad, pad)),
+            mode="constant",
+            constant_values=CAM2BIN_DIST_MM,
+        )
+
+        action_x_pix, action_y_pix = self.coord_converter.action_xy_to_pix(
+            action[0], action[1], img_w, img_h
+        )
+        # Adjust the action point for the padded image
+        action_x_pix += WINDOW_SIZE // 2
+        action_y_pix += WINDOW_SIZE // 2
+
+        # Crop the rgb and depth patches
+        crop_xmin = action_x_pix - WINDOW_SIZE // 2
+        crop_xmax = action_x_pix + WINDOW_SIZE // 2
+        crop_ymin = action_y_pix - WINDOW_SIZE // 2
+        crop_ymax = action_y_pix + WINDOW_SIZE // 2
+
+        rgb_copy = rgb_padded.copy()
+        depth_copy = depth_padded.copy()
+
+        DEBUG_PLOT = False  # DO NOT SET TO TRUE FOR PRODUCTION
+        if DEBUG_PLOT:
+            cv2.rectangle(
+                rgb_copy, (crop_xmin, crop_ymin), (crop_xmax, crop_ymax), (0, 0, 255), 2
+            )
+            cv2.rectangle(
+                depth_copy,
+                (crop_xmin, crop_ymin),
+                (crop_xmax, crop_ymax),
+                (0, 0, 255),
+                2,
+            )
+            cv2.circle(rgb_copy, (action_x_pix, action_y_pix), 5, (0, 0, 255), -1)
+            cv2.circle(depth_copy, (action_x_pix, action_y_pix), 5, (0, 0, 255), -1)
+            cv2.imshow("rgb_patch_plot", cv2.cvtColor(rgb_copy, cv2.COLOR_RGB2BGR))
+            cv2.imshow("depth_patch_plot", depth_copy)
+
+        rgb_patch = rgb_padded[crop_ymin:crop_ymax, crop_xmin:crop_xmax, :]
+        depth_patch = depth_padded[crop_ymin:crop_ymax, crop_xmin:crop_xmax]
+
+        return rgb_patch, depth_patch
+
+    def __len__(self):
+        return len(self.npz_files)
+
+    def __getitem__(self, idx):
+        rgb = self.rgb_images[idx]
+        depth = self.depth_images[idx]
+        action = self.actions[idx]
+
+        # Display the rgb and depth images (convert RGB to BGR for OpenCV display)
+        cv2.imshow("rgb", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+        cv2.imshow("depth", depth)
+
+        # print(f"Action: {action}")
+
+        rgb_cropped, depth_cropped = self.__crop_rgbd_bin(rgb, depth)
+
+        rgb_patch, depth_patch = self.__crop_rgbd_patch(
+            action, rgb_cropped, depth_cropped, rgb_cropped.shape
+        )
+
+        cv2.imshow("rgb_patch", cv2.cvtColor(rgb_patch, cv2.COLOR_RGB2BGR))
+        cv2.imshow("depth_patch", depth_patch)
+        cv2.waitKey(0)
+
+        weight_label = self.start_weights[idx] - self.final_weights[idx]
+
+        return (rgb_patch, depth_patch), weight_label
+
+
+def test_dataset():
+    dataset = GraspDataset()
+    for i in range(len(dataset)):
+        (rgb_patch, depth_patch), weight_label = dataset[i]
+        print(f"Weight label: {weight_label}")
+
+    cv2.destroyAllWindows()
+
+
+def main():
+    from torch.utils.data import DataLoader
+
+    dataset = GraspDataset()
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=0)
+
+    for i, ((rgb_patches, depth_patches), weight_labels) in enumerate(dataloader):
+        # print(f"Batch {i}:")
+        # print(f"  RGB patch shape: {rgb_patches.shape}")
+        # print(f"  Depth patch shape: {depth_patches.shape}")
+        # print(f"  Weight labels: {weight_labels}")
+
+        # Convert tensors to numpy arrays for visualization
+        rgb_np = rgb_patches[0].numpy()  # shape: (H, W, C) or (C, H, W)
+        depth_np = depth_patches[0].numpy()
+        weight = (
+            weight_labels[0].item()
+            if hasattr(weight_labels[0], "item")
+            else float(weight_labels[0])
+        )
+
+        # If rgb is (C, H, W), transpose to (H, W, C)
+        if rgb_np.shape[0] in [1, 3] and rgb_np.shape[0] != rgb_np.shape[-1]:
+            rgb_np = np.transpose(rgb_np, (1, 2, 0))
+
+        # Write the weight on the rgb image
+        cv2.putText(
+            rgb_np,
+            f"Weight: {weight:.2f}",
+            (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (0, 255, 0),
+            2,
+        )
+
+        cv2.imshow(f"rgb_patch_{i}.jpg", cv2.cvtColor(rgb_np, cv2.COLOR_RGB2BGR))
+        cv2.imshow(f"depth_patch_{i}.png", depth_np)
+
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+        break
+
+
+if __name__ == "__main__":
+    test_dataset()
