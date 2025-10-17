@@ -105,6 +105,8 @@ def unit_test_network():
             predicted_mass.shape[:-1] == weight_labels.shape
         ), f"[Batch {i}] Predicted mass shape is incorrect: {predicted_mass.shape} != {weight_labels.shape}"
 
+    print("Network tested successfully!")
+
 
 if __name__ == "__main__":
     unit_test_dataset()

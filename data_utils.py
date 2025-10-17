@@ -26,6 +26,9 @@ CROP_XMAX = 465
 CROP_YMIN = 0
 CROP_YMAX = 330
 
+# For filtering good grasps
+GOOD_Z_BELOW_SURFACE = 0.04
+
 ########################################################
 # Copy of the sample points function in granular_grasp_dc.py
 ########################################################
@@ -102,12 +105,13 @@ class GraspDataset(Dataset):
         self.data_dir = data_dir
         self.coord_converter = CoordConverter()
 
+        # Extract data from the npz files
         self.rgb_images = []
         self.depth_images = []
         self.weight_labels = []
         # self.start_weights = []
         # self.final_weights = []
-        # self.z_below_surface = []
+        self.z_below_surface = []
         # self.actions = []
 
         self.npz_files = glob.glob(
@@ -119,8 +123,8 @@ class GraspDataset(Dataset):
             # self.depth_images.append(data["depth"])
             # self.start_weights.append(data["start_weight"])
             # self.final_weights.append(data["final_weight"])
-            # self.z_below_surface.append(data["z_below_surface"])
             # self.actions.append(data["a1"])
+            self.z_below_surface.append(data["z_below_surface"])
             rgb_cropped, depth_cropped = self.__crop_rgbd_bin(
                 data["rgb"], data["depth"]
             )
@@ -130,6 +134,32 @@ class GraspDataset(Dataset):
             self.rgb_images.append(rgb_patch)
             self.depth_images.append(depth_patch)
             self.weight_labels.append(data["start_weight"] - data["final_weight"])
+
+        # Only keep the good grasps
+        self.rgb_images, self.depth_images, self.weight_labels = (
+            self.__filter_good_grasps(
+                self.rgb_images,
+                self.depth_images,
+                self.weight_labels,
+                self.z_below_surface,
+            )
+        )
+
+    def __filter_good_grasps(
+        self, rgb_images, depth_images, weight_labels, z_below_surface
+    ):
+        good_rgb_images = []
+        good_depth_images = []
+        good_weight_labels = []
+
+        for rgb, depth, weight_label, z_below_surface in zip(
+            rgb_images, depth_images, weight_labels, z_below_surface
+        ):
+            if z_below_surface == GOOD_Z_BELOW_SURFACE:
+                good_rgb_images.append(rgb)
+                good_depth_images.append(depth)
+                good_weight_labels.append(weight_label)
+        return good_rgb_images, good_depth_images, good_weight_labels
 
     def __crop_rgbd_bin(self, rgb, depth):
         cropped_rgb = rgb[CROP_YMIN:CROP_YMAX, CROP_XMIN:CROP_XMAX, :]
@@ -192,7 +222,7 @@ class GraspDataset(Dataset):
         return rgb_patch, depth_patch
 
     def __len__(self):
-        return len(self.npz_files)
+        return len(self.rgb_images)
 
     def __getitem__(self, idx):
         rgb = self.rgb_images[idx]

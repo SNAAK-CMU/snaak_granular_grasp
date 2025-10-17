@@ -214,7 +214,7 @@ def train_model(
     model = model.to(device)
 
     # Define optimizer and loss function
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
     criterion = F.mse_loss
 
     # Learning rate scheduler
@@ -251,7 +251,7 @@ def train_model(
         train_losses.append(train_avg_loss)
         val_losses.append(val_avg_loss)
 
-        print(f"Learning Rate: {optimizer.param_groups[0]['lr']:.6f}")
+        print(f"Learning Rate: {optimizer.param_groups[0]['lr']:.10f}")
         print("-" * 50)
 
     return train_losses, val_losses
@@ -282,7 +282,7 @@ def plot_training_curves(train_losses, val_losses=None, save_path=None):
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
         print(f"Training curve saved to {save_path}")
 
-    plt.show()
+    # plt.show()
 
 
 def save_model(model, filepath):
@@ -310,8 +310,8 @@ def main():
     # Configuration
     data_dir = "/home/parth/snaak/snaak_data/data_parth"
     base_dir = "/home/parth/snaak/projects/granular_grasp/runs"
-    batch_size = 8
-    num_epochs = 50
+    batch_size = 2
+    num_epochs = 200
     learning_rate = 0.001
 
     # Create run directory
