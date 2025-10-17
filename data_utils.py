@@ -9,7 +9,7 @@ import torch.nn.functional as F
 
 
 DEFAULT_DATA_DIR = "/home/parth/snaak/snaak_data/data_parth"
-WINDOW_SIZE = 40  # pixels
+WINDOW_SIZE = 150  # (pixels) The model architecture depends on this!
 
 
 # Bin dimensions
@@ -83,6 +83,14 @@ class CoordConverter:
         # print(f"x_disp_pix: {x_disp_pix}, y_disp_pix: {y_disp_pix}")
         action_x_pix = img_w // 2 - x_disp_pix
         action_y_pix = img_h // 2 - y_disp_pix
+
+        # TODO: Fix the actions m to actions pix conversion
+        # Clipping should be not be needed here if the conversion is correct
+
+        # Clip the action points to the image boundaries
+        action_x_pix = np.clip(action_x_pix, 0, img_w - 1)
+        action_y_pix = np.clip(action_y_pix, 0, img_h - 1)
+
         # print("Img center x, y: ", img_w // 2, img_h // 2)
         # print(f"action_x_pix: {action_x_pix}, action_y_pix: {action_y_pix}")
         return (action_x_pix, action_y_pix)
@@ -96,33 +104,42 @@ class GraspDataset(Dataset):
 
         self.rgb_images = []
         self.depth_images = []
-        self.start_weights = []
-        self.final_weights = []
-        self.z_below_surface = []
-        self.actions = []
+        self.weight_labels = []
+        # self.start_weights = []
+        # self.final_weights = []
+        # self.z_below_surface = []
+        # self.actions = []
 
         self.npz_files = glob.glob(
             os.path.join(self.data_dir, "**/*.npz"), recursive=True
         )
         for npz_file in self.npz_files:
             data = np.load(npz_file, allow_pickle=True)
-            self.rgb_images.append(data["rgb"])
-            self.depth_images.append(data["depth"])
-            self.start_weights.append(data["start_weight"])
-            self.final_weights.append(data["final_weight"])
-            self.z_below_surface.append(data["z_below_surface"])
-            self.actions.append(data["a1"])
+            # self.rgb_images.append(data["rgb"])
+            # self.depth_images.append(data["depth"])
+            # self.start_weights.append(data["start_weight"])
+            # self.final_weights.append(data["final_weight"])
+            # self.z_below_surface.append(data["z_below_surface"])
+            # self.actions.append(data["a1"])
+            rgb_cropped, depth_cropped = self.__crop_rgbd_bin(
+                data["rgb"], data["depth"]
+            )
+            rgb_patch, depth_patch = self.__crop_rgbd_patch(
+                data["a1"], rgb_cropped, depth_cropped
+            )
+            self.rgb_images.append(rgb_patch)
+            self.depth_images.append(depth_patch)
+            self.weight_labels.append(data["start_weight"] - data["final_weight"])
 
     def __crop_rgbd_bin(self, rgb, depth):
         cropped_rgb = rgb[CROP_YMIN:CROP_YMAX, CROP_XMIN:CROP_XMAX, :]
         cropped_depth = depth[CROP_YMIN:CROP_YMAX, CROP_XMIN:CROP_XMAX]
         return cropped_rgb, cropped_depth
 
-    def __crop_rgbd_patch(self, action, rgb, depth, rgb_shape):
-        img_h, img_w, _ = rgb_shape
+    def __crop_rgbd_patch(self, action, rgb, depth):
+        img_h, img_w, _ = rgb.shape
 
         # Pad the rgb image and the depth image with zeros
-        pad_width = WINDOW_SIZE // 2
         pad = WINDOW_SIZE // 2
         rgb_padded = np.pad(
             rgb,
@@ -141,20 +158,19 @@ class GraspDataset(Dataset):
             action[0], action[1], img_w, img_h
         )
         # Adjust the action point for the padded image
-        action_x_pix += WINDOW_SIZE // 2
-        action_y_pix += WINDOW_SIZE // 2
+        action_x_pix += pad
+        action_y_pix += pad
 
         # Crop the rgb and depth patches
-        crop_xmin = action_x_pix - WINDOW_SIZE // 2
-        crop_xmax = action_x_pix + WINDOW_SIZE // 2
-        crop_ymin = action_y_pix - WINDOW_SIZE // 2
-        crop_ymax = action_y_pix + WINDOW_SIZE // 2
-
-        rgb_copy = rgb_padded.copy()
-        depth_copy = depth_padded.copy()
+        crop_xmin = action_x_pix - (WINDOW_SIZE // 2)
+        crop_xmax = crop_xmin + WINDOW_SIZE
+        crop_ymin = action_y_pix - (WINDOW_SIZE // 2)
+        crop_ymax = crop_ymin + WINDOW_SIZE
 
         DEBUG_PLOT = False  # DO NOT SET TO TRUE FOR PRODUCTION
         if DEBUG_PLOT:
+            rgb_copy = rgb_padded.copy()
+            depth_copy = depth_padded.copy()
             cv2.rectangle(
                 rgb_copy, (crop_xmin, crop_ymin), (crop_xmax, crop_ymax), (0, 0, 255), 2
             )
@@ -181,25 +197,20 @@ class GraspDataset(Dataset):
     def __getitem__(self, idx):
         rgb = self.rgb_images[idx]
         depth = self.depth_images[idx]
-        action = self.actions[idx]
+        weight_label = self.weight_labels[idx]
 
-        # Display the rgb and depth images (convert RGB to BGR for OpenCV display)
-        cv2.imshow("rgb", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
-        cv2.imshow("depth", depth)
+        # TODO: Normalize the rgb
+        # TODO: Shift the depth to make the bin surface at 0
+        # TODO: Normalize the depth
 
-        # print(f"Action: {action}")
+        # Convert to torch tensor with proper data types
+        rgb_patch = torch.from_numpy(rgb)
+        depth_patch = torch.from_numpy(depth)
+        weight_label = torch.tensor(weight_label)
 
-        rgb_cropped, depth_cropped = self.__crop_rgbd_bin(rgb, depth)
-
-        rgb_patch, depth_patch = self.__crop_rgbd_patch(
-            action, rgb_cropped, depth_cropped, rgb_cropped.shape
-        )
-
-        cv2.imshow("rgb_patch", cv2.cvtColor(rgb_patch, cv2.COLOR_RGB2BGR))
-        cv2.imshow("depth_patch", depth_patch)
-        cv2.waitKey(0)
-
-        weight_label = self.start_weights[idx] - self.final_weights[idx]
+        # Make dimensions suitable for convolutional layers
+        depth_patch = depth_patch.unsqueeze(0)
+        rgb_patch = rgb_patch.permute(2, 0, 1)
 
         return (rgb_patch, depth_patch), weight_label
 
@@ -210,7 +221,7 @@ def test_dataset():
         (rgb_patch, depth_patch), weight_label = dataset[i]
         print(f"Weight label: {weight_label}")
 
-    cv2.destroyAllWindows()
+    # cv2.destroyAllWindows()
 
 
 def main():

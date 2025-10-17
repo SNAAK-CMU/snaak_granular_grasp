@@ -111,20 +111,6 @@ class MassEstimationModel(nn.Module):
         return mass_estimate
 
 
-def mse_loss(predicted_mass, true_mass):
-    """
-    Mean Squared Error loss function for mass estimation.
-
-    Args:
-        predicted_mass: Predicted mass values (batch_size, 1)
-        true_mass: True mass values (batch_size, 1)
-
-    Returns:
-        loss: MSE loss value
-    """
-    return F.mse_loss(predicted_mass, true_mass)
-
-
 if __name__ == "__main__":
     # Test the model
     model = MassEstimationModel()
@@ -144,5 +130,5 @@ if __name__ == "__main__":
 
     # Test loss function
     true_mass = torch.randn(batch_size, 1)
-    loss = mse_loss(output, true_mass)
+    loss = F.mse_loss(output, true_mass)
     print(f"MSE Loss: {loss.item():.4f}")
