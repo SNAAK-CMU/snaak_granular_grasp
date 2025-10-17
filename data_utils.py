@@ -6,7 +6,7 @@ import cv2
 import torch
 from torch.utils.data import Dataset
 import torch.nn.functional as F
-
+import torchvision.transforms as T
 
 DEFAULT_DATA_DIR = "/home/parth/snaak/snaak_data/data_parth"
 WINDOW_SIZE = 150  # (pixels) The model architecture depends on this!
@@ -99,11 +99,33 @@ class CoordConverter:
         return (action_x_pix, action_y_pix)
 
 
+def create_transform_rgb():
+    # Step 1: Basic transformations
+    transform_list = [
+        # Convert PIL Image to tensor (automatically converts to float32 and scales to [0, 1])
+        T.ToTensor(),
+    ]
+
+    transform = T.Compose(transform_list)
+    return transform
+
+
+def create_transform_depth():
+    transform_list = [
+        T.ToTensor(),
+        T.Lambda(lambda x: x - CAM2BIN_DIST_MM),
+    ]
+    transform = T.Compose(transform_list)
+    return transform
+
+
 class GraspDataset(Dataset):
-    def __init__(self, data_dir=DEFAULT_DATA_DIR):
+    def __init__(self, transform_rgb, transform_depth, data_dir=DEFAULT_DATA_DIR):
         super().__init__()
         self.data_dir = data_dir
         self.coord_converter = CoordConverter()
+        self.transform_rgb = transform_rgb
+        self.transform_depth = transform_depth
 
         # Extract data from the npz files
         self.rgb_images = []
@@ -231,16 +253,14 @@ class GraspDataset(Dataset):
 
         # TODO: Normalize the rgb
         # TODO: Shift the depth to make the bin surface at 0
-        # TODO: Normalize the depth
+
+        rgb_patch = self.transform_rgb(rgb)
+        depth_patch = self.transform_depth(depth)
 
         # Convert to torch tensor with proper data types
-        rgb_patch = torch.from_numpy(rgb.astype(np.float32))
-        depth_patch = torch.from_numpy(depth.astype(np.float32))
+        rgb_patch = rgb_patch.to(torch.float32)
+        depth_patch = depth_patch.to(torch.float32)
         weight_label = torch.tensor(weight_label.astype(np.float32))
-
-        # Make dimensions suitable for convolutional layers
-        depth_patch = depth_patch.unsqueeze(0)
-        rgb_patch = rgb_patch.permute(2, 0, 1)
 
         return (rgb_patch, depth_patch), weight_label
 

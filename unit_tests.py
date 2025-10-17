@@ -1,13 +1,21 @@
 import torch
 
 from data_utils import GraspDataset
-from train import create_train_val_dataloaders
+from train import (
+    create_train_val_dataloaders,
+    create_transform_rgb,
+    create_transform_depth,
+)
 from network import MassEstimationModel
 
 
 def unit_test_dataset():
+    transform_rgb = create_transform_rgb()
+    transform_depth = create_transform_depth()
     dataset = GraspDataset(
         data_dir="/home/parth/snaak/snaak_data/data_parth",
+        transform_rgb=transform_rgb,
+        transform_depth=transform_depth,
     )
     for i in range(len(dataset)):
         (rgb_patches, depth_patches), weight_label = dataset[i]

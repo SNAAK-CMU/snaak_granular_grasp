@@ -8,11 +8,11 @@ import os
 import datetime
 import json
 
-from data_utils import GraspDataset
+from data_utils import GraspDataset, create_transform_rgb, create_transform_depth
 from network import MassEstimationModel
 
 
-def create_run_directory(base_dir):
+def create_run_directory(base_dir, run_name=None):
     """
     Create a new directory for this training run.
 
@@ -26,8 +26,11 @@ def create_run_directory(base_dir):
     os.makedirs(base_dir, exist_ok=True)
 
     # Generate timestamp for unique run name
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = os.path.join(base_dir, f"run_{timestamp}")
+    if run_name is None:
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_dir = os.path.join(base_dir, f"run_{timestamp}")
+    else:
+        run_dir = os.path.join(base_dir, run_name)
 
     # Create the run directory
     os.makedirs(run_dir, exist_ok=True)
@@ -63,7 +66,9 @@ def create_train_val_dataloaders(data_dir, batch_size=8, shuffle=True, num_worke
     Returns:
         DataLoader: PyTorch DataLoader
     """
-    dataset = GraspDataset(data_dir)
+    transform_rgb = create_transform_rgb()
+    transform_depth = create_transform_depth()
+    dataset = GraspDataset(transform_rgb, transform_depth, data_dir)
 
     # Split into train and validation sets (80/20 split)
     train_size = int(0.8 * len(dataset))
@@ -310,12 +315,13 @@ def main():
     # Configuration
     data_dir = "/home/parth/snaak/snaak_data/data_parth"
     base_dir = "/home/parth/snaak/projects/granular_grasp/runs"
+    run_name = "run_test_transforms_1"
     batch_size = 2
     num_epochs = 200
     learning_rate = 0.001
 
     # Create run directory
-    run_dir = create_run_directory(base_dir)
+    run_dir = create_run_directory(base_dir, run_name)
 
     # Save training configuration
     config = {
@@ -323,7 +329,7 @@ def main():
         "batch_size": batch_size,
         "num_epochs": num_epochs,
         "learning_rate": learning_rate,
-        "timestamp": datetime.datetime.now().isoformat(),
+        "run_name": run_name,
     }
     save_training_config(run_dir, config)
 
