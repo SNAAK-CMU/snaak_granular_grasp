@@ -204,9 +204,9 @@ class GraspDataset(Dataset):
         # TODO: Normalize the depth
 
         # Convert to torch tensor with proper data types
-        rgb_patch = torch.from_numpy(rgb)
-        depth_patch = torch.from_numpy(depth)
-        weight_label = torch.tensor(weight_label)
+        rgb_patch = torch.from_numpy(rgb.astype(np.float32))
+        depth_patch = torch.from_numpy(depth.astype(np.float32))
+        weight_label = torch.tensor(weight_label.astype(np.float32))
 
         # Make dimensions suitable for convolutional layers
         depth_patch = depth_patch.unsqueeze(0)
