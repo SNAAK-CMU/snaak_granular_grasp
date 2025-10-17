@@ -92,19 +92,21 @@ def unit_test_network():
         num_workers=2,
     )
 
-    # Print sample size of the data loaders
-    print(f"Train loader sample size: {len(train_loader.dataset)}")
-    print(f"Val loader sample size: {len(val_loader.dataset)}")
-    print(f"Train loader batch size: {len(train_loader)}")
-    print(f"Val loader batch size: {len(val_loader)}")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = MassEstimationModel().to(device)
 
-    (rgb_patches, depth_patches), weight_labels = train_loader.dataset[0]
-    print(f"RGB patches shape: {rgb_patches.shape}")
-    print(f"Depth patches shape: {depth_patches.shape}")
-    print(f"Weight labels shape: {weight_labels.shape}")
-    print(f"Weight labels: {weight_labels}")
+    for i, ((rgb_patches, depth_patches), weight_labels) in enumerate(train_loader):
+        rgb_patches = rgb_patches.to(device)
+        depth_patches = depth_patches.to(device)
+        weight_labels = weight_labels.to(device)
+
+        predicted_mass = model(rgb_patches, depth_patches)
+        assert (
+            predicted_mass.shape[:-1] == weight_labels.shape
+        ), f"[Batch {i}] Predicted mass shape is incorrect: {predicted_mass.shape} != {weight_labels.shape}"
 
 
 if __name__ == "__main__":
     unit_test_dataset()
     unit_test_dataloaders()
+    unit_test_network()

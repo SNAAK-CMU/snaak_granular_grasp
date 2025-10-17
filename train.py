@@ -77,6 +77,7 @@ def create_train_val_dataloaders(data_dir, batch_size=8, shuffle=True, num_worke
         shuffle=shuffle,
         num_workers=num_workers,
         pin_memory=True if torch.cuda.is_available() else False,
+        drop_last=True,  # Drop the last incomplete batch
     )
     val_dataloader = DataLoader(
         val_dataset,
@@ -84,6 +85,7 @@ def create_train_val_dataloaders(data_dir, batch_size=8, shuffle=True, num_worke
         shuffle=False,
         num_workers=num_workers,
         pin_memory=True if torch.cuda.is_available() else False,
+        drop_last=True,  # Drop the last incomplete batch
     )
 
     return train_dataloader, val_dataloader
