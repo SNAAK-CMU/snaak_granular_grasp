@@ -11,49 +11,27 @@ import torchvision.transforms as T
 DEFAULT_DATA_DIR = "/home/parth/snaak/snaak_data/data_parth"
 WINDOW_SIZE = 150  # (pixels) The model architecture depends on this!
 
+####### Ensure these are same for the dataloader and the data collection node #######
 
 # Bin dimensions
 BIN_WIDTH_M = 0.140
 BIN_LENGTH_M = 0.240
-BIN_HEIGHT = 0.046
-BIN_WIDTH_PIX = 330
-BIN_LENGTH_PIX = 195
-CAM2BIN_DIST_MM = 325
+BIN_HEIGHT = 0.065
+BIN_WIDTH_PIX = 189
+BIN_LENGTH_PIX = 326
+CAM2BIN_DIST_MM = 320
+
 
 # For cropping the bin from rgb and depth image
-CROP_XMIN = 270
-CROP_XMAX = 465
+CROP_XMIN = 274
+CROP_XMAX = 463
 CROP_YMIN = 0
-CROP_YMAX = 330
+CROP_YMAX = 326
+
+#####################################################################################
 
 # For filtering good grasps
 GOOD_Z_BELOW_SURFACE = 0.04
-
-########################################################
-# Copy of the sample points function in granular_grasp_dc.py
-########################################################
-
-# BIN_WIDTH = 0.140
-# BIN_LENGTH = 0.240
-# BIN_DEPTH = 0.045
-
-# END_EFFECTOR_RADIUS = 0.06
-
-# def sample_point(self, zmin, zmax, depth_image):
-#     # TODO: Update this for granular grasping
-#     xmin = -BIN_WIDTH / 2 + END_EFFECTOR_RADIUS
-#     xmax = BIN_WIDTH / 2 - END_EFFECTOR_RADIUS
-
-#     ymin = -BIN_LENGTH / 2 + END_EFFECTOR_RADIUS
-#     ymax = BIN_LENGTH / 2 - END_EFFECTOR_RADIUS
-
-#     x = random.uniform(xmin, xmax)
-#     y = random.uniform(ymin, ymax)
-
-#     z = self.get_z_from_depth(x, y, zmin, zmax, depth_image)
-
-#     return (x, y, z)
-######################## End of copy ####################
 
 
 class CoordConverter:
@@ -85,10 +63,7 @@ class CoordConverter:
         x_disp_pix, y_disp_pix = self.m_to_pix(action_x_m, action_y_m)
         # print(f"x_disp_pix: {x_disp_pix}, y_disp_pix: {y_disp_pix}")
         action_x_pix = img_w // 2 - x_disp_pix
-        action_y_pix = img_h // 2 - y_disp_pix
-
-        # TODO: Fix the actions m to actions pix conversion
-        # Clipping should be not be needed here if the conversion is correct
+        action_y_pix = img_h // 2 + y_disp_pix
 
         # Clip the action points to the image boundaries
         action_x_pix = np.clip(action_x_pix, 0, img_w - 1)
