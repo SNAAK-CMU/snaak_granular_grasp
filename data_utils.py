@@ -32,6 +32,9 @@ CROP_YMAX = 326
 
 # For filtering good grasps
 GOOD_Z_BELOW_SURFACE = 0.03
+# Reject grasps with weight outside this range
+WEIGHT_MIN = 0.0
+WEIGHT_MAX = 20.0
 
 
 class CoordConverter:
@@ -152,7 +155,9 @@ class GraspDataset(Dataset):
         for rgb, depth, weight_label, z_below_surface in zip(
             rgb_images, depth_images, weight_labels, z_below_surface
         ):
-            if z_below_surface == GOOD_Z_BELOW_SURFACE:
+            if (z_below_surface == GOOD_Z_BELOW_SURFACE) and (
+                WEIGHT_MIN <= weight_label <= WEIGHT_MAX
+            ):
                 good_rgb_images.append(rgb)
                 good_depth_images.append(depth)
                 good_weight_labels.append(weight_label)

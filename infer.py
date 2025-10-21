@@ -245,13 +245,25 @@ def infer_on_bin(rgb_img, depth_img, model, device):
         pred_weights.append(pred.item())
 
     if DEBUG_PLOT:
+        resize_factor = 2
         rgb_img_for_viz = cv2.resize(
-            rgb_img.copy(), fx=2, fy=2, interpolation=cv2.INTER_NEAREST, dsize=None
+            rgb_img.copy(),
+            fx=resize_factor,
+            fy=resize_factor,
+            interpolation=cv2.INTER_NEAREST,
+            dsize=None,
+        )
+        depth_img_for_viz = cv2.resize(
+            depth_img.copy(),
+            fx=resize_factor,
+            fy=resize_factor,
+            interpolation=cv2.INTER_NEAREST,
+            dsize=None,
         )
         for center, pred_weight in zip(centers, pred_weights):
             x, y = center
-            x = x * 2
-            y = y * 2
+            x = x * resize_factor
+            y = y * resize_factor
             # Top-left and bottom-right of the patch
             # top_left = (x - WINDOW_SIZE // 2, y - WINDOW_SIZE // 2)
             # bottom_right = (x + WINDOW_SIZE // 2 - 1, y + WINDOW_SIZE // 2 - 1)
@@ -266,17 +278,22 @@ def infer_on_bin(rgb_img, depth_img, model, device):
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
                 (255, 0, 0),
-                1,
+                2,
             )
 
         cv2.imshow(
             "Predicted Weights",
-            cv2.resize(
-                rgb_img_for_viz, fx=2, fy=2, interpolation=cv2.INTER_NEAREST, dsize=None
-            ),
+            rgb_img_for_viz,
         )
+
+        # Show the depth image using matplotlib
+        plt.imshow(depth_img_for_viz, cmap="viridis")
+        plt.colorbar()
+        plt.show()
+
         cv2.waitKey(0)
         cv2.destroyAllWindows()
+        plt.close()
 
 
 def main():
@@ -311,8 +328,7 @@ def test_get_patches_from_image_and_depth_maps():
     img = cv2.imread(img_path)
 
     # Create a depth map
-    depth_map = np.zeros((img.shape[0], img.shape[1]))
-    depth_map[img.shape[0] // 2, img.shape[1] // 2] = 100
+    depth_map = np.load("/home/parth/snaak/projects/granular_grasp/depth_map.npy")
 
     # Crop out the bin from the image and depth maps
     img = img[CROP_YMIN:CROP_YMAX, CROP_XMIN:CROP_XMAX, :]
@@ -332,8 +348,7 @@ def test_infer_on_bin():
 
     img_path = "/home/parth/snaak/projects/granular_grasp/rgb_image.jpg"
     img = cv2.imread(img_path)
-    depth_map = np.zeros((img.shape[0], img.shape[1]))
-    depth_map[img.shape[0] // 2, img.shape[1] // 2] = 100
+    depth_map = np.load("/home/parth/snaak/projects/granular_grasp/depth_map.npy")
     infer_on_bin(img, depth_map, model, device)
 
 
