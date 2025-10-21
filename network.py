@@ -56,7 +56,7 @@ class MassEstimationModel(nn.Module):
         base_channels=16,
         fc_hidden=128,
         fc_hidden2=64,
-        num_blocks=5,
+        num_blocks=4,
     ):
         super(MassEstimationModel, self).__init__()
 
@@ -67,10 +67,9 @@ class MassEstimationModel(nn.Module):
         self.depth_branch = ImageBranch(depth_channels, num_blocks, base_channels)
 
         # Calculate the size after conv blocks and maxpool
-        # Assuming input size of 150x150, after 5 conv blocks and 1 maxpool:
-        # 150 -> 150 -> 150 -> 150 -> 150 -> 150 -> 75 (after maxpool)
-        # Over 5 blocks, output size: 150 (input size) -> 75 -> 37 -> 18 -> 9 -> 4 (output size)
-        conv_output_size = 4 * 4 * base_channels * 2  # *2 for concatenation
+        # Assuming input size of 50x50, after 4 conv blocks and 1 maxpool:
+        # Over 5 blocks, output size: 50 (input size) -> 25 -> 12 -> 6 -> 3 (output size)
+        conv_output_size = 3 * 3 * base_channels * 2  # *2 for concatenation
 
         # Fully connected layers
         self.combined_branch = nn.Sequential(

@@ -9,7 +9,8 @@ import torch.nn.functional as F
 import torchvision.transforms as T
 
 DEFAULT_DATA_DIR = "/home/parth/snaak/snaak_data/data_parth"
-WINDOW_SIZE = 150  # (pixels) The model architecture depends on this!
+WINDOW_SIZE = 50  # (pixels) The model architecture depends on this!
+
 
 ####### Ensure these are same for the dataloader and the data collection node #######
 
