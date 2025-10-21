@@ -1,6 +1,6 @@
 import torch
 
-from data_utils import GraspDataset
+from data_utils import GraspDataset, WINDOW_SIZE
 from train import (
     create_train_val_dataloaders,
     create_transform_rgb,
@@ -22,13 +22,13 @@ def unit_test_dataset():
         # Assert the shapes of the rgb and depth patches
         assert rgb_patches.shape == (
             3,
-            150,
-            150,
+            WINDOW_SIZE,
+            WINDOW_SIZE,
         ), f"RGB patches shape is incorrect: {rgb_patches.shape}"
         assert depth_patches.shape == (
             1,
-            150,
-            150,
+            WINDOW_SIZE,
+            WINDOW_SIZE,
         ), f"Depth patches shape is incorrect: {depth_patches.shape}"
         assert weight_label.shape == (), "Weight label shape is incorrect"
 
@@ -61,13 +61,13 @@ def unit_test_dataloaders(batch_size=2):
     for i, ((rgb_patches, depth_patches), weight_labels) in enumerate(train_loader):
         assert rgb_patches.shape[1:] == (
             3,
-            150,
-            150,
+            WINDOW_SIZE,
+            WINDOW_SIZE,
         ), f"[Batch {i}] RGB patches shape is incorrect: {rgb_patches.shape[1:]}"
         assert depth_patches.shape[1:] == (
             1,
-            150,
-            150,
+            WINDOW_SIZE,
+            WINDOW_SIZE,
         ), f"[Batch {i}] Depth patches shape is incorrect: {depth_patches.shape[1:]}"
         assert (
             weight_labels.shape[1:] == ()
@@ -76,13 +76,13 @@ def unit_test_dataloaders(batch_size=2):
     for i, ((rgb_patches, depth_patches), weight_labels) in enumerate(val_loader):
         assert rgb_patches.shape[1:] == (
             3,
-            150,
-            150,
+            WINDOW_SIZE,
+            WINDOW_SIZE,
         ), f"[Batch {i}] RGB patches shape is incorrect: {rgb_patches.shape[1:]}"
         assert depth_patches.shape[1:] == (
             1,
-            150,
-            150,
+            WINDOW_SIZE,
+            WINDOW_SIZE,
         ), f"[Batch {i}] Depth patches shape is incorrect: {depth_patches.shape[1:]}"
         assert (
             weight_labels.shape[1:] == ()
