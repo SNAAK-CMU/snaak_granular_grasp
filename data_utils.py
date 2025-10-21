@@ -92,6 +92,9 @@ def create_transform_depth():
     transform_list = [
         T.ToTensor(),
         T.Lambda(lambda x: x - CAM2BIN_DIST_MM),
+        T.Lambda(
+            lambda x: torch.where(x < 0, torch.tensor(BIN_HEIGHT * 1000), x)
+        ),  # Replace negative values with depth to bin bottom
     ]
     transform = T.Compose(transform_list)
     return transform
