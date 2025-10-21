@@ -22,7 +22,6 @@ BIN_WIDTH_PIX = 189
 BIN_LENGTH_PIX = 326
 CAM2BIN_DIST_MM = 320
 
-
 # For cropping the bin from rgb and depth image
 CROP_XMIN = 274
 CROP_XMAX = 463
@@ -32,7 +31,7 @@ CROP_YMAX = 326
 #####################################################################################
 
 # For filtering good grasps
-GOOD_Z_BELOW_SURFACE = 0.04
+GOOD_Z_BELOW_SURFACE = 0.03
 
 
 class CoordConverter:
