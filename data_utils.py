@@ -91,7 +91,7 @@ def create_transform_rgb():
 def create_transform_depth():
     transform_list = [
         T.ToTensor(),
-        T.Lambda(lambda x: x - CAM2BIN_DIST_MM),
+        T.Lambda(lambda x: x - (CAM2BIN_DIST_MM - 20)),
         T.Lambda(
             lambda x: torch.where(x < 0, torch.tensor(BIN_HEIGHT * 1000), x)
         ),  # Replace negative values with depth to bin bottom
@@ -101,25 +101,39 @@ def create_transform_depth():
 
 
 class GraspDataset(Dataset):
-    def __init__(self, transform_rgb, transform_depth, data_dir=DEFAULT_DATA_DIR):
+    def __init__(
+        self,
+        transform_rgb,
+        transform_depth,
+        data_dir=DEFAULT_DATA_DIR,
+        debug_mode=False,
+    ):
         super().__init__()
         self.data_dir = data_dir
+        self.debug_mode = debug_mode
         self.coord_converter = CoordConverter()
         self.transform_rgb = transform_rgb
         self.transform_depth = transform_depth
 
         # Extract data from the npz files
+        self.bin_rgb_images = []
+        self.bin_depth_images = []
         self.rgb_images = []
         self.depth_images = []
         self.weight_labels = []
         # self.start_weights = []
         # self.final_weights = []
         self.z_below_surface = []
+        self.crop_coordinates = []
         # self.actions = []
 
         self.npz_files = glob.glob(
             os.path.join(self.data_dir, "**/*.npz"), recursive=True
         )
+
+        # Sort the npz files by name
+        self.npz_files.sort()
+
         for npz_file in self.npz_files:
             data = np.load(npz_file, allow_pickle=True)
             # self.rgb_images.append(data["rgb"])
@@ -131,32 +145,69 @@ class GraspDataset(Dataset):
             rgb_cropped, depth_cropped = self.__crop_rgbd_bin(
                 data["rgb"], data["depth"]
             )
-            rgb_patch, depth_patch = self.__crop_rgbd_patch(
+            rgb_patch, depth_patch, crop_coordinate = self.__crop_rgbd_patch(
                 data["a1"], rgb_cropped, depth_cropped
             )
+
+            # Shift the depth_crop image to have the bin surface at 0
+            depth_cropped -= CAM2BIN_DIST_MM
+
+            # Plot the crop bounding box on rgb and depth images
+            crop_coordinate = [coord - (WINDOW_SIZE // 2) for coord in crop_coordinate]
+            [xmin, ymin, xmax, ymax] = crop_coordinate
+            cv2.rectangle(rgb_cropped, (xmin, ymin), (xmax, ymax), (0, 0, 255), 2)
+            cv2.rectangle(depth_cropped, (xmin, ymin), (xmax, ymax), (0, 0, 255), 2)
+
+            self.bin_rgb_images.append(rgb_cropped)
+            self.bin_depth_images.append(depth_cropped)
             self.rgb_images.append(rgb_patch)
             self.depth_images.append(depth_patch)
             self.weight_labels.append(data["start_weight"] - data["final_weight"])
 
         # Only keep the good grasps
-        self.rgb_images, self.depth_images, self.weight_labels = (
-            self.__filter_good_grasps(
-                self.rgb_images,
-                self.depth_images,
-                self.weight_labels,
-                self.z_below_surface,
-            )
+        (
+            self.rgb_images,
+            self.depth_images,
+            self.weight_labels,
+            self.bin_rgb_images,
+            self.bin_depth_images,
+        ) = self.__filter_good_grasps(
+            self.rgb_images,
+            self.depth_images,
+            self.weight_labels,
+            self.z_below_surface,
+            self.bin_rgb_images,
+            self.bin_depth_images,
         )
 
     def __filter_good_grasps(
-        self, rgb_images, depth_images, weight_labels, z_below_surface
+        self,
+        rgb_images,
+        depth_images,
+        weight_labels,
+        z_below_surface,
+        bin_rgb_images,
+        bin_depth_images,
     ):
         good_rgb_images = []
         good_depth_images = []
         good_weight_labels = []
-
-        for rgb, depth, weight_label, z_below_surface in zip(
-            rgb_images, depth_images, weight_labels, z_below_surface
+        good_bin_rgb_images = []
+        good_bin_depth_images = []
+        for (
+            rgb,
+            depth,
+            weight_label,
+            z_below_surface,
+            bin_rgb,
+            bin_depth,
+        ) in zip(
+            rgb_images,
+            depth_images,
+            weight_labels,
+            z_below_surface,
+            bin_rgb_images,
+            bin_depth_images,
         ):
             if (z_below_surface == GOOD_Z_BELOW_SURFACE) and (
                 WEIGHT_MIN <= weight_label <= WEIGHT_MAX
@@ -164,7 +215,15 @@ class GraspDataset(Dataset):
                 good_rgb_images.append(rgb)
                 good_depth_images.append(depth)
                 good_weight_labels.append(weight_label)
-        return good_rgb_images, good_depth_images, good_weight_labels
+                good_bin_rgb_images.append(bin_rgb)
+                good_bin_depth_images.append(bin_depth)
+        return (
+            good_rgb_images,
+            good_depth_images,
+            good_weight_labels,
+            good_bin_rgb_images,
+            good_bin_depth_images,
+        )
 
     def __crop_rgbd_bin(self, rgb, depth):
         cropped_rgb = rgb[CROP_YMIN:CROP_YMAX, CROP_XMIN:CROP_XMAX, :]
@@ -224,7 +283,7 @@ class GraspDataset(Dataset):
         rgb_patch = rgb_padded[crop_ymin:crop_ymax, crop_xmin:crop_xmax, :]
         depth_patch = depth_padded[crop_ymin:crop_ymax, crop_xmin:crop_xmax]
 
-        return rgb_patch, depth_patch
+        return rgb_patch, depth_patch, [crop_xmin, crop_ymin, crop_xmax, crop_ymax]
 
     def __len__(self):
         return len(self.rgb_images)
@@ -244,6 +303,18 @@ class GraspDataset(Dataset):
         rgb_patch = rgb_patch.to(torch.float32)
         depth_patch = depth_patch.to(torch.float32)
         weight_label = torch.tensor(weight_label.astype(np.float32))
+
+        if self.debug_mode:
+            debug_dict = {
+                "rgb_img": self.bin_rgb_images[idx],
+                "depth_img": self.bin_depth_images[idx],
+                "npz_file": self.npz_files[idx],
+            }
+            return (
+                (rgb_patch, depth_patch),
+                weight_label,
+                debug_dict,
+            )
 
         return (rgb_patch, depth_patch), weight_label
 

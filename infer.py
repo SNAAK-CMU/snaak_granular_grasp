@@ -2,11 +2,12 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
+from torch.utils.data import DataLoader
 import cv2
 
 from network import MassEstimationModel
 from train import create_train_val_dataloaders
-from data_utils import create_transform_rgb, create_transform_depth
+from data_utils import GraspDataset, create_transform_rgb, create_transform_depth
 from data_utils import CROP_XMIN, CROP_XMAX, CROP_YMIN, CROP_YMAX
 from data_utils import (
     BIN_LENGTH_PIX,
@@ -297,10 +298,10 @@ def infer_on_bin(rgb_img, depth_img, model, device):
 
 
 def main():
-    model_path = "/home/parth/snaak/projects/granular_grasp/runs/train_w50_run_1/mass_estimation_model.pth"
+    model_path = "/home/parth/snaak/projects/granular_grasp/runs/train_w50_run_4/mass_estimation_model.pth"
     input_data_dir = "/home/parth/snaak/snaak_data/data_parth"
     output_data_dir = (
-        "/home/parth/snaak/projects/granular_grasp/runs/train_w50_run_1/inference"
+        "/home/parth/snaak/projects/granular_grasp/runs/train_w50_run_4/inference"
     )
     batch_size = 1
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -310,14 +311,14 @@ def main():
     model.eval()
     model.to(device)
 
-    train_loader, val_loader = create_train_val_dataloaders(
-        data_dir=input_data_dir,
-        batch_size=batch_size,
+    dataset = GraspDataset(
+        create_transform_rgb(), create_transform_depth(), input_data_dir
     )
+    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
     run_inference_and_save_plots(
         model=model,
-        data_loader=val_loader,
+        data_loader=data_loader,
         output_dir=output_data_dir,
         device=device,
     )
@@ -339,7 +340,7 @@ def test_get_patches_from_image_and_depth_maps():
 
 def test_infer_on_bin():
 
-    model_path = "/home/parth/snaak/projects/granular_grasp/runs/train_w50_run_1/mass_estimation_model.pth"
+    model_path = "/home/parth/snaak/projects/granular_grasp/runs/train_w50_run_4/mass_estimation_model.pth"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = MassEstimationModel()
     model.load_state_dict(torch.load(model_path)["model_state_dict"])
@@ -353,4 +354,5 @@ def test_infer_on_bin():
 
 
 if __name__ == "__main__":
-    test_infer_on_bin()
+    # test_infer_on_bin()
+    main()
