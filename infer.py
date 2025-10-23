@@ -185,30 +185,36 @@ def get_patches_from_image_and_depth_maps(
     centers = []
 
     for y in y_vals:
+        centers_row = []
+        patches_rgb_row = []
+        patches_depth_row = []
         for x in x_vals:
             top = y - WINDOW_SIZE // 2
             left = x - WINDOW_SIZE // 2
             rgb_patch = rgb_img[top : top + WINDOW_SIZE, left : left + WINDOW_SIZE, :]
             depth_patch = depth_img[top : top + WINDOW_SIZE, left : left + WINDOW_SIZE]
-            patches_rgb.append(rgb_patch)
-            patches_depth.append(depth_patch)
-            centers.append((x, y))
+            patches_rgb_row.append(rgb_patch)
+            patches_depth_row.append(depth_patch)
+            centers_row.append((x, y))
+        centers.append(centers_row)
+        patches_rgb.append(patches_rgb_row)
+        patches_depth.append(patches_depth_row)
 
     # Make a copy so the original image isn't modified (OpenCV format, uint8)
     rgb_img_for_viz = rgb_img.copy()
 
     if DEBUG_PLOT:
-        for center in centers:
-            x, y = center
-            # Top-left and bottom-right of the patch
-            top_left = (x - WINDOW_SIZE // 2, y - WINDOW_SIZE // 2)
-            bottom_right = (x + WINDOW_SIZE // 2 - 1, y + WINDOW_SIZE // 2 - 1)
-            # Draw rectangle (BGR=green)
-            cv2.rectangle(rgb_img_for_viz, top_left, bottom_right, (0, 255, 0), 2)
-            # Draw center (BGR=red)
-            cv2.circle(rgb_img_for_viz, (x, y), 4, (0, 0, 255), -1)
+        for centers_row in centers:
+            for center in centers_row:
+                x, y = center
+                # Top-left and bottom-right of the patch
+                top_left = (x - WINDOW_SIZE // 2, y - WINDOW_SIZE // 2)
+                bottom_right = (x + WINDOW_SIZE // 2 - 1, y + WINDOW_SIZE // 2 - 1)
+                # Draw rectangle (BGR=green)
+                cv2.rectangle(rgb_img_for_viz, top_left, bottom_right, (0, 255, 0), 2)
+                # Draw center (BGR=red)
+                cv2.circle(rgb_img_for_viz, (x, y), 4, (0, 0, 255), -1)
 
-        # Optional: Show or save the visualization (commented out, for user to enable as needed)
         cv2.imshow("Patch Visualization", rgb_img_for_viz)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
@@ -216,8 +222,7 @@ def get_patches_from_image_and_depth_maps(
     return patches_rgb, patches_depth, centers
 
 
-def infer_on_bin(rgb_img, depth_img, model, device):
-
+def infer_on_bin(rgb_img, depth_img, model, transform_rgb, transform_depth, device):
     # Crop out the bin from the image and depth maps
     rgb_img = rgb_img[CROP_YMIN:CROP_YMAX, CROP_XMIN:CROP_XMAX, :]
     depth_img = depth_img[CROP_YMIN:CROP_YMAX, CROP_XMIN:CROP_XMAX]
@@ -227,23 +232,37 @@ def infer_on_bin(rgb_img, depth_img, model, device):
         rgb_img, depth_img, bin_padding=BIN_PADDING
     )
 
-    # Preprocess the image and depth maps
-    transform_rgb = create_transform_rgb()
-    transform_depth = create_transform_depth()
+    print("Got patches from the image and depth maps")
+    print(f"Number of patches: {len(patches_rgb)}")
+    print(f"Number of patches per row: {len(patches_rgb)}")
+    print(f"Number of patches per column: {len(patches_rgb[0])}")
+    print(f"Shape of each patch: {patches_rgb[0][0].shape}")
+
+    # Run inference on the patches
     pred_weights = []
-    for rgb_patch, depth_patch, center in zip(patches_rgb, patches_depth, centers):
-        rgb_patch = transform_rgb(rgb_patch)
-        depth_patch = transform_depth(depth_patch)
-        rgb_patch = rgb_patch.to(torch.float32).to(device)
-        depth_patch = depth_patch.to(torch.float32).to(device)
+    for row_i in range(len(patches_rgb)):
+        pred_weights_row = []
+        for col_i in range(len(patches_rgb[row_i])):
+            rgb_patch = patches_rgb[row_i][col_i]
+            depth_patch = patches_depth[row_i][col_i]
 
-        rgb_patch = rgb_patch.unsqueeze(0)
-        depth_patch = depth_patch.unsqueeze(0)
+            # Preprocess the patch
+            rgb_patch = transform_rgb(rgb_patch)
+            depth_patch = transform_depth(depth_patch)
+            rgb_patch = rgb_patch.to(torch.float32).to(device)
+            depth_patch = depth_patch.to(torch.float32).to(device)
 
-        pred = model(rgb_patch, depth_patch)
-        pred = pred.squeeze(-1)
+            rgb_patch = rgb_patch.unsqueeze(0)
+            depth_patch = depth_patch.unsqueeze(0)
 
-        pred_weights.append(pred.item())
+            pred = model(rgb_patch, depth_patch)
+            pred = pred.squeeze(-1)
+
+            pred_weights_row.append(pred.item())
+        pred_weights.append(pred_weights_row)
+
+    centers = np.array(centers)
+    pred_weights = np.array(pred_weights)
 
     if DEBUG_PLOT:
         resize_factor = 2
@@ -261,26 +280,29 @@ def infer_on_bin(rgb_img, depth_img, model, device):
             interpolation=cv2.INTER_NEAREST,
             dsize=None,
         )
-        for center, pred_weight in zip(centers, pred_weights):
-            x, y = center
-            x = x * resize_factor
-            y = y * resize_factor
-            # Top-left and bottom-right of the patch
-            # top_left = (x - WINDOW_SIZE // 2, y - WINDOW_SIZE // 2)
-            # bottom_right = (x + WINDOW_SIZE // 2 - 1, y + WINDOW_SIZE // 2 - 1)
-            # Draw rectangle (BGR=green)
-            # cv2.rectangle(rgb_img_for_viz, top_left, bottom_right, (0, 255, 0), 2)
-            # Draw center (BGR=red)
-            # cv2.circle(rgb_img_for_viz, (x, y), 4, (0, 0, 255), -1)
-            cv2.putText(
-                rgb_img_for_viz,
-                f"{pred_weight:.0f}",
-                (x, y),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (255, 0, 0),
-                2,
-            )
+        # Handle 2D arrays of centers and pred_weights
+        for i in range(centers.shape[0]):
+            for j in range(centers.shape[1]):
+                x, y = centers[i, j]
+                pred_weight = pred_weights[i, j]
+                x = x * resize_factor
+                y = y * resize_factor
+                # Top-left and bottom-right of the patch
+                # top_left = (x - WINDOW_SIZE // 2, y - WINDOW_SIZE // 2)
+                # bottom_right = (x + WINDOW_SIZE // 2 - 1, y + WINDOW_SIZE // 2 - 1)
+                # Draw rectangle (BGR=green)
+                # cv2.rectangle(rgb_img_for_viz, top_left, bottom_right, (0, 255, 0), 2)
+                # Draw center (BGR=red)
+                # cv2.circle(rgb_img_for_viz, (x, y), 4, (0, 0, 255), -1)
+                cv2.putText(
+                    rgb_img_for_viz,
+                    f"{pred_weight:.0f}",
+                    (int(x), int(y)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 0, 0),
+                    2,
+                )
 
         cv2.imshow(
             "Predicted Weights",
@@ -296,12 +318,127 @@ def infer_on_bin(rgb_img, depth_img, model, device):
         cv2.destroyAllWindows()
         plt.close()
 
+    return centers, pred_weights
+
+
+def calculate_loss(row_i, col_i, w_desired, pred_weights, lambda_neighbor=0.25):
+    cell_loss = abs(pred_weights[row_i][col_i] - w_desired)
+    neighbor_loss = 0
+    n_neighbors = 0
+    for neighbor_row in [row_i - 1, row_i + 1]:
+        for neighbor_col in [col_i - 1, col_i + 1]:
+            # skip if neighbor is out of bounds
+            if not (
+                0 <= neighbor_row < pred_weights.shape[0]
+                and 0 <= neighbor_col < pred_weights.shape[1]
+            ):
+                continue
+
+            neighbor_loss += abs(pred_weights[neighbor_row][neighbor_col] - w_desired)
+            n_neighbors += 1
+    neighbor_loss = neighbor_loss / n_neighbors
+
+    total_loss = cell_loss + lambda_neighbor * neighbor_loss
+    return total_loss
+
+
+def get_xy_for_weight(w_desired, rgb_img, depth_img, model, device):
+    # TODO: Move this to the class constructor
+    transform_rgb = create_transform_rgb()
+    transform_depth = create_transform_depth()
+
+    centers, pred_weights = infer_on_bin(
+        rgb_img, depth_img, model, transform_rgb, transform_depth, device
+    )
+
+    # Crop out the bin from the image and depth maps
+    rgb_img = rgb_img[CROP_YMIN:CROP_YMAX, CROP_XMIN:CROP_XMAX, :]
+    depth_img = depth_img[CROP_YMIN:CROP_YMAX, CROP_XMIN:CROP_XMAX]
+
+    # Calculate a score for each point on the grid based on the desired weight
+    best_x, best_y, min_loss = 0, 0, float("inf")
+    losses = np.zeros((centers.shape[0], centers.shape[1])) * 1000.0
+    for row_i in range(centers.shape[0]):
+        for col_i in range(centers.shape[1]):
+            loss = calculate_loss(row_i, col_i, w_desired, pred_weights)
+            losses[row_i, col_i] = loss
+            if loss < min_loss:
+                min_loss = loss
+                best_x, best_y = centers[row_i, col_i]
+
+    print(f"Best x: {best_x}, Best y: {best_y}, Min loss: {min_loss}")
+
+    if DEBUG_PLOT:
+        resize_factor = 2
+        rgb_img_for_viz = cv2.resize(
+            rgb_img.copy(),
+            fx=resize_factor,
+            fy=resize_factor,
+            interpolation=cv2.INTER_NEAREST,
+            dsize=None,
+        )
+
+        # Draw a circle at the best x, y
+        best_x_print = best_x * resize_factor
+        best_y_print = best_y * resize_factor
+        cv2.circle(
+            rgb_img_for_viz,
+            (int(best_x_print), int(best_y_print)),
+            15,
+            (255, 0, 255),
+            2,
+        )
+
+        # Handle 2D arrays of centers and pred_weights
+        for i in range(centers.shape[0]):
+            for j in range(centers.shape[1]):
+                x, y = centers[i, j]
+                pred_weight = pred_weights[i, j]
+                x = x * resize_factor
+                y = y * resize_factor
+                # Top-left and bottom-right of the patch
+                # top_left = (x - WINDOW_SIZE // 2, y - WINDOW_SIZE // 2)
+                # bottom_right = (x + WINDOW_SIZE // 2 - 1, y + WINDOW_SIZE // 2 - 1)
+                # Draw rectangle (BGR=green)
+                # cv2.rectangle(rgb_img_for_viz, top_left, bottom_right, (0, 255, 0), 2)
+                # Draw center (BGR=red)
+                # cv2.circle(rgb_img_for_viz, (x, y), 4, (0, 0, 255), -1)
+                cv2.putText(
+                    rgb_img_for_viz,
+                    f"{pred_weight:.1f}",
+                    (int(x), int(y)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 0, 0),
+                    2,
+                )
+                cv2.putText(
+                    rgb_img_for_viz,
+                    f"{losses[i, j]:.1f}",
+                    (int(x), int(y) + 15),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 0, 255),
+                    2,
+                )
+
+        cv2.imshow(
+            "Predicted Weights",
+            rgb_img_for_viz,
+        )
+
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+        plt.close()
+
+    return best_x, best_y
+
 
 def main():
-    model_path = "/home/parth/snaak/projects/granular_grasp/runs/train_w50_run_4/mass_estimation_model.pth"
+    model_path = "/home/parth/snaak/projects/granular_grasp/runs/train_w50_run_5/mass_estimation_model.pth"
     input_data_dir = "/home/parth/snaak/snaak_data/data_parth"
     output_data_dir = (
-        "/home/parth/snaak/projects/granular_grasp/runs/train_w50_run_4/inference"
+        "/home/parth/snaak/projects/granular_grasp/runs/train_w50_run_5/inference"
     )
     batch_size = 1
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -340,19 +477,48 @@ def test_get_patches_from_image_and_depth_maps():
 
 def test_infer_on_bin():
 
-    model_path = "/home/parth/snaak/projects/granular_grasp/runs/train_w50_run_4/mass_estimation_model.pth"
+    # Load model
+    model_path = "/home/parth/snaak/projects/granular_grasp/runs/train_w50_run_7/mass_estimation_model.pth"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = MassEstimationModel()
     model.load_state_dict(torch.load(model_path)["model_state_dict"])
     model.eval()
     model.to(device)
 
+    # Create transformation functions
+    transform_rgb = create_transform_rgb()
+    transform_depth = create_transform_depth()
+
+    # Load image and depth map
     img_path = "/home/parth/snaak/projects/granular_grasp/rgb_image.jpg"
     img = cv2.imread(img_path)
     depth_map = np.load("/home/parth/snaak/projects/granular_grasp/depth_map.npy")
-    infer_on_bin(img, depth_map, model, device)
+
+    # Run inference on the bin
+    infer_on_bin(img, depth_map, model, transform_rgb, transform_depth, device)
+
+
+def test_get_xy_for_weight():
+    # Load model
+    model_path = "/home/parth/snaak/projects/granular_grasp/runs/train_w50_run_7/mass_estimation_model.pth"
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = MassEstimationModel()
+    model.load_state_dict(torch.load(model_path)["model_state_dict"])
+    model.eval()
+    model.to(device)
+
+    # Create transformation functions
+    transform_rgb = create_transform_rgb()
+    transform_depth = create_transform_depth()
+
+    # Load image and depth map
+    img_path = "/home/parth/snaak/projects/granular_grasp/rgb_image.jpg"
+    img = cv2.imread(img_path)
+    depth_map = np.load("/home/parth/snaak/projects/granular_grasp/depth_map.npy")
+
+    best_x, best_y = get_xy_for_weight(4, img, depth_map, model, device)
+    print(f"Best x: {best_x}, Best y: {best_y}")
 
 
 if __name__ == "__main__":
-    # test_infer_on_bin()
-    main()
+    test_get_xy_for_weight()
