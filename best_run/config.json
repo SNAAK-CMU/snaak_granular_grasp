@@ -1,0 +1,9 @@
+{
+    "data_dir": "/home/parth/snaak/snaak_data/data_parth",
+    "batch_size": 8,
+    "num_epochs": 100,
+    "learning_rate": 0.0005,
+    "run_name": "train_w50_run_7",
+    "train_size": 108,
+    "val_size": 13
+}
