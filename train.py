@@ -71,7 +71,7 @@ def create_train_val_dataloaders(data_dir, batch_size=8, shuffle=True, num_worke
     dataset = GraspDataset(transform_rgb, transform_depth, data_dir)
 
     # Split into train and validation sets (80/20 split)
-    train_size = int(0.8 * len(dataset))
+    train_size = int(0.9 * len(dataset))
     val_size = len(dataset) - train_size
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 
@@ -315,23 +315,13 @@ def main():
     # Configuration
     data_dir = "/home/parth/snaak/snaak_data/data_parth"
     base_dir = "/home/parth/snaak/projects/granular_grasp/runs"
-    run_name = "run_test_transforms_1"
-    batch_size = 2
-    num_epochs = 200
-    learning_rate = 0.001
+    run_name = "train_w50_run_8"
+    batch_size = 8
+    num_epochs = 100
+    learning_rate = 0.0005
 
     # Create run directory
     run_dir = create_run_directory(base_dir, run_name)
-
-    # Save training configuration
-    config = {
-        "data_dir": data_dir,
-        "batch_size": batch_size,
-        "num_epochs": num_epochs,
-        "learning_rate": learning_rate,
-        "run_name": run_name,
-    }
-    save_training_config(run_dir, config)
 
     # Set device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -346,6 +336,19 @@ def main():
     print(f"Number of batches: {len(train_loader)}")
     print(f"Validation dataset size: {len(val_loader.dataset)} samples")
     print(f"Number of batches: {len(val_loader)}")
+    print(f"Batch size: {batch_size}")
+
+    # Save training configuration
+    config = {
+        "data_dir": data_dir,
+        "batch_size": batch_size,
+        "num_epochs": num_epochs,
+        "learning_rate": learning_rate,
+        "run_name": run_name,
+        "train_size": len(train_loader.dataset),
+        "val_size": len(val_loader.dataset),
+    }
+    save_training_config(run_dir, config)
 
     # Create model
     print("Creating model...")

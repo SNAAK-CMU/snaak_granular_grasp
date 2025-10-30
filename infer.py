@@ -516,7 +516,7 @@ def test_get_xy_for_weight():
     img = cv2.imread(img_path)
     depth_map = np.load("/home/parth/snaak/projects/granular_grasp/depth_map.npy")
 
-    best_x, best_y = get_xy_for_weight(4, img, depth_map, model, device)
+    best_x, best_y = get_xy_for_weight(6, img, depth_map, model, device)
     print(f"Best x: {best_x}, Best y: {best_y}")
 
 

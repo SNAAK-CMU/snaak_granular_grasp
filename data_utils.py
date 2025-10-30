@@ -8,6 +8,8 @@ from torch.utils.data import Dataset
 import torch.nn.functional as F
 import torchvision.transforms as T
 
+from network import MassEstimationModel
+
 DEFAULT_DATA_DIR = "/home/parth/snaak/snaak_data/data_parth"
 WINDOW_SIZE = 50  # (pixels) The model architecture depends on this!
 
