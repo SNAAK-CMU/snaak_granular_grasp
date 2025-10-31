@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import DataLoader
 import cv2
+from tqdm import tqdm
 
 from network import MassEstimationModel
 from train import create_train_val_dataloaders
@@ -203,7 +204,7 @@ def get_patches_from_image_and_depth_maps(
     # Make a copy so the original image isn't modified (OpenCV format, uint8)
     rgb_img_for_viz = rgb_img.copy()
 
-    if DEBUG_PLOT:
+    if DEBUG_PLOT and False:
         for centers_row in centers:
             for center in centers_row:
                 x, y = center
@@ -232,11 +233,11 @@ def infer_on_bin(rgb_img, depth_img, model, transform_rgb, transform_depth, devi
         rgb_img, depth_img, bin_padding=BIN_PADDING
     )
 
-    print("Got patches from the image and depth maps")
-    print(f"Number of patches: {len(patches_rgb)}")
-    print(f"Number of patches per row: {len(patches_rgb)}")
-    print(f"Number of patches per column: {len(patches_rgb[0])}")
-    print(f"Shape of each patch: {patches_rgb[0][0].shape}")
+    # print("Got patches from the image and depth maps")
+    # print(f"Number of patches: {len(patches_rgb)}")
+    # print(f"Number of patches per row: {len(patches_rgb)}")
+    # print(f"Number of patches per column: {len(patches_rgb[0])}")
+    # print(f"Shape of each patch: {patches_rgb[0][0].shape}")
 
     # Run inference on the patches
     pred_weights = []
@@ -264,7 +265,7 @@ def infer_on_bin(rgb_img, depth_img, model, transform_rgb, transform_depth, devi
     centers = np.array(centers)
     pred_weights = np.array(pred_weights)
 
-    if DEBUG_PLOT:
+    if DEBUG_PLOT and False:
         resize_factor = 2
         rgb_img_for_viz = cv2.resize(
             rgb_img.copy(),
@@ -342,10 +343,16 @@ def calculate_loss(row_i, col_i, w_desired, pred_weights, lambda_neighbor=0.25):
     return total_loss
 
 
-def get_xy_for_weight(w_desired, rgb_img, depth_img, model, device):
-    # TODO: Move this to the class constructor
-    transform_rgb = create_transform_rgb()
-    transform_depth = create_transform_depth()
+def get_xy_for_weight(
+    w_desired,
+    rgb_img,
+    depth_img,
+    model,
+    device,
+    transform_rgb,
+    transform_depth,
+    save_path=None,
+):
 
     centers, pred_weights = infer_on_bin(
         rgb_img, depth_img, model, transform_rgb, transform_depth, device
@@ -366,7 +373,7 @@ def get_xy_for_weight(w_desired, rgb_img, depth_img, model, device):
                 min_loss = loss
                 best_x, best_y = centers[row_i, col_i]
 
-    print(f"Best x: {best_x}, Best y: {best_y}, Min loss: {min_loss}")
+    # print(f"Best x: {best_x}, Best y: {best_y}, Min loss: {min_loss}")
 
     if DEBUG_PLOT:
         resize_factor = 2
@@ -422,14 +429,16 @@ def get_xy_for_weight(w_desired, rgb_img, depth_img, model, device):
                     2,
                 )
 
-        cv2.imshow(
-            "Predicted Weights",
-            rgb_img_for_viz,
-        )
-
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-        plt.close()
+        if save_path is not None:
+            cv2.imwrite(save_path, rgb_img_for_viz)
+        else:
+            cv2.imshow(
+                "Predicted Weights",
+                rgb_img_for_viz,
+            )
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+            plt.close()
 
     return best_x, best_y
 
@@ -500,7 +509,9 @@ def test_infer_on_bin():
 
 def test_get_xy_for_weight():
     # Load model
-    model_path = "/home/parth/snaak/projects/granular_grasp/runs/train_w50_run_7/mass_estimation_model.pth"
+    model_path = (
+        "/home/parth/snaak/projects/granular_grasp/best_run/mass_estimation_model.pth"
+    )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = MassEstimationModel()
     model.load_state_dict(torch.load(model_path)["model_state_dict"])
@@ -516,9 +527,51 @@ def test_get_xy_for_weight():
     img = cv2.imread(img_path)
     depth_map = np.load("/home/parth/snaak/projects/granular_grasp/depth_map.npy")
 
-    best_x, best_y = get_xy_for_weight(6, img, depth_map, model, device)
+    best_x, best_y = get_xy_for_weight(
+        6, img, depth_map, model, device, transform_rgb, transform_depth
+    )
     print(f"Best x: {best_x}, Best y: {best_y}")
 
 
+def infer_on_extracted_data():
+    desired_weight = 10.0
+    rgb_save_dir = "/home/parth/snaak/snaak_data/extracted/rgb"
+    depth_save_dir = "/home/parth/snaak/snaak_data/extracted/depth"
+    output_save_dir = "/home/parth/snaak/snaak_data/extracted/inference"
+
+    model_path = (
+        "/home/parth/snaak/projects/granular_grasp/best_run/mass_estimation_model.pth"
+    )
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = MassEstimationModel()
+    model.load_state_dict(torch.load(model_path)["model_state_dict"])
+    model.eval()
+    model.to(device)
+
+    # Create transformation functions
+    transform_rgb = create_transform_rgb()
+    transform_depth = create_transform_depth()
+
+    rgb_files = sorted(os.listdir(rgb_save_dir))
+    depth_files = sorted(os.listdir(depth_save_dir))
+
+    for rgb_file, depth_file in tqdm(zip(rgb_files, depth_files), total=len(rgb_files)):
+        rgb_path = os.path.join(rgb_save_dir, rgb_file)
+        depth_path = os.path.join(depth_save_dir, depth_file)
+        rgb = cv2.imread(rgb_path)
+        depth = np.load(depth_path)
+        save_path = os.path.join(output_save_dir, f"pred_{rgb_file}")
+        best_x, best_y = get_xy_for_weight(
+            desired_weight,
+            rgb,
+            depth,
+            model,
+            device,
+            transform_rgb,
+            transform_depth,
+            save_path,
+        )
+
+
 if __name__ == "__main__":
-    test_get_xy_for_weight()
+    infer_on_extracted_data()
