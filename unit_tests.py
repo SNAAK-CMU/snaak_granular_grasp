@@ -90,10 +90,11 @@ def unit_test_dataloaders(ingredient_name="lettuce", batch_size=2):
     print("Dataloaders tested successfully!")
 
 
-def unit_test_network():
+def unit_test_network(ingredient_name="lettuce"):
     # Create data loaders
     train_loader, val_loader = create_train_val_dataloaders(
-        data_dir="/home/parth/snaak/snaak_data/data_parth",
+        ingredient_name=ingredient_name,
+        data_dir=f"/home/parth/snaak/snaak_data/data_parth/{ingredient_name}",
         batch_size=2,
         shuffle=True,
         num_workers=2,
@@ -118,4 +119,4 @@ def unit_test_network():
 if __name__ == "__main__":
     unit_test_dataset("onions")
     unit_test_dataloaders("onions", batch_size=1)
-    # unit_test_network()
+    unit_test_network("onions")
