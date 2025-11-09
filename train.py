@@ -53,7 +53,9 @@ def save_training_config(run_dir, config):
     print(f"Training configuration saved to {config_path}")
 
 
-def create_train_val_dataloaders(data_dir, batch_size=8, shuffle=True, num_workers=2):
+def create_train_val_dataloaders(
+    ingredient_name, data_dir, batch_size=8, shuffle=True, num_workers=2
+):
     """
     Create a DataLoader for the grasp dataset.
 
@@ -66,9 +68,7 @@ def create_train_val_dataloaders(data_dir, batch_size=8, shuffle=True, num_worke
     Returns:
         DataLoader: PyTorch DataLoader
     """
-    transform_rgb = create_transform_rgb()
-    transform_depth = create_transform_depth()
-    dataset = GraspDataset(transform_rgb, transform_depth, data_dir)
+    dataset = GraspDataset(ingredient_name, data_dir)
 
     # Split into train and validation sets (80/20 split)
     train_size = int(0.9 * len(dataset))

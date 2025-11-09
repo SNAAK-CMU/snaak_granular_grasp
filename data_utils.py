@@ -61,9 +61,12 @@ CROP_COORDS_DICT = {
 
 #####################################################################################
 
+GOOD_Z_BELOW_SURFACE_DICT = {
+    "lettuce": 0.030,
+    "onions": 0.010,
+}
+
 # For filtering good grasps
-GOOD_Z_BELOW_SURFACE = 0.03
-# Reject grasps with weight outside this range
 WEIGHT_MIN = 0.0
 WEIGHT_MAX = 20.0
 
@@ -120,32 +123,62 @@ def create_transform_rgb():
     return transform
 
 
-def create_transform_depth():
+def create_transform_depth(cam2bin_dist_mm, bin_height_m=0.065):
     transform_list = [
         T.ToTensor(),
-        T.Lambda(lambda x: x - (CAM2BIN_DIST_MM - 20)),
+        T.Lambda(lambda x: x - (cam2bin_dist_mm - 20)),
         T.Lambda(
-            lambda x: torch.where(x < 0, torch.tensor(BIN_HEIGHT * 1000), x)
+            lambda x: torch.where(x < 0, torch.tensor(bin_height_m * 1000) + 20, x)
         ),  # Replace negative values with depth to bin bottom
     ]
     transform = T.Compose(transform_list)
     return transform
 
 
+def rotate_image_clockwise(image, angle_deg):
+    (h, w) = image.shape[:2]
+    center = (w // 2, h // 2)
+    M = cv2.getRotationMatrix2D(center, -angle_deg, 1.0)  # negative for clockwise
+    if len(image.shape) == 3:
+        border_value = (0, 0, 0)
+    else:
+        border_value = 0
+    rotated = cv2.warpAffine(
+        image,
+        M,
+        (w, h),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=border_value,
+    )
+    return rotated
+
+
 class GraspDataset(Dataset):
     def __init__(
         self,
-        transform_rgb,
-        transform_depth,
+        ingredient_name,
         data_dir=DEFAULT_DATA_DIR,
         debug_mode=False,
     ):
         super().__init__()
-        self.data_dir = data_dir
+
+        assert ingredient_name in ["lettuce", "onions"], "Invalid ingredient name"
+        self.ingredient_name = ingredient_name
+        self.pick_bin_id = INGREDIENT2BIN_DICT[ingredient_name]["pick_id"]
+        self.bin_dims_dict = BIN_DIMS_DICT[self.pick_bin_id]
+        self.crop_coords_dict = CROP_COORDS_DICT[self.pick_bin_id]
+        self.cam2bin_dist_mm = self.bin_dims_dict["cam2bin_dist_mm"]
+        self.coord_converter = CoordConverter(self.bin_dims_dict)
         self.debug_mode = debug_mode
-        self.coord_converter = CoordConverter()
-        self.transform_rgb = transform_rgb
-        self.transform_depth = transform_depth
+        self.transform_rgb = create_transform_rgb()
+        self.transform_depth = create_transform_depth(self.cam2bin_dist_mm)
+        self.ideal_z_below_surface = GOOD_Z_BELOW_SURFACE_DICT[ingredient_name]
+
+        assert (
+            self.ingredient_name in data_dir
+        ), f"Data directory does not contain the ingredient name: {self.ingredient_name}"
+        self.data_dir = data_dir
 
         # Extract data from the npz files
         self.bin_rgb_images = []
@@ -153,11 +186,8 @@ class GraspDataset(Dataset):
         self.rgb_images = []
         self.depth_images = []
         self.weight_labels = []
-        # self.start_weights = []
-        # self.final_weights = []
         self.z_below_surface = []
         self.crop_coordinates = []
-        # self.actions = []
 
         self.npz_files = glob.glob(
             os.path.join(self.data_dir, "**/*.npz"), recursive=True
@@ -168,11 +198,6 @@ class GraspDataset(Dataset):
 
         for npz_file in self.npz_files:
             data = np.load(npz_file, allow_pickle=True)
-            # self.rgb_images.append(data["rgb"])
-            # self.depth_images.append(data["depth"])
-            # self.start_weights.append(data["start_weight"])
-            # self.final_weights.append(data["final_weight"])
-            # self.actions.append(data["a1"])
             self.z_below_surface.append(data["z_below_surface"])
             rgb_cropped, depth_cropped = self.__crop_rgbd_bin(
                 data["rgb"], data["depth"]
@@ -182,7 +207,7 @@ class GraspDataset(Dataset):
             )
 
             # Shift the depth_crop image to have the bin surface at 0
-            depth_cropped -= CAM2BIN_DIST_MM
+            depth_cropped -= self.cam2bin_dist_mm
 
             # Plot the crop bounding box on rgb and depth images
             crop_coordinate = [coord - (WINDOW_SIZE // 2) for coord in crop_coordinate]
@@ -241,7 +266,7 @@ class GraspDataset(Dataset):
             bin_rgb_images,
             bin_depth_images,
         ):
-            if (z_below_surface == GOOD_Z_BELOW_SURFACE) and (
+            if (z_below_surface == self.ideal_z_below_surface) and (
                 WEIGHT_MIN <= weight_label <= WEIGHT_MAX
             ):
                 good_rgb_images.append(rgb)
@@ -258,13 +283,27 @@ class GraspDataset(Dataset):
         )
 
     def __crop_rgbd_bin(self, rgb, depth):
-        cropped_rgb = rgb[CROP_YMIN:CROP_YMAX, CROP_XMIN:CROP_XMAX, :]
-        cropped_depth = depth[CROP_YMIN:CROP_YMAX, CROP_XMIN:CROP_XMAX]
+        crop_xmin, crop_xmax = (
+            self.crop_coords_dict["xmin"],
+            self.crop_coords_dict["xmax"],
+        )
+        crop_ymin, crop_ymax = (
+            self.crop_coords_dict["ymin"],
+            self.crop_coords_dict["ymax"],
+        )
+
+        if self.ingredient_name == "onions":
+            # Rotate the image anti-clockwise by 90 degrees
+            rgb = cv2.rotate(rgb, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            rgb = rotate_image_clockwise(rgb, 2.5)
+            depth = cv2.rotate(depth, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            depth = rotate_image_clockwise(depth, 2.5)
+
+        cropped_rgb = rgb[crop_ymin:crop_ymax, crop_xmin:crop_xmax, :]
+        cropped_depth = depth[crop_ymin:crop_ymax, crop_xmin:crop_xmax]
         return cropped_rgb, cropped_depth
 
     def __crop_rgbd_patch(self, action, rgb, depth):
-        img_h, img_w, _ = rgb.shape
-
         # Pad the rgb image and the depth image with zeros
         pad = WINDOW_SIZE // 2
         rgb_padded = np.pad(
@@ -277,11 +316,11 @@ class GraspDataset(Dataset):
             depth,
             ((pad, pad), (pad, pad)),
             mode="constant",
-            constant_values=CAM2BIN_DIST_MM,
+            constant_values=self.cam2bin_dist_mm,
         )
 
         action_x_pix, action_y_pix = self.coord_converter.action_xy_to_pix(
-            action[0], action[1], img_w, img_h
+            action[0], action[1]
         )
         # Adjust the action point for the padded image
         action_x_pix += pad
@@ -326,7 +365,6 @@ class GraspDataset(Dataset):
         weight_label = self.weight_labels[idx]
 
         # TODO: Normalize the rgb
-        # TODO: Shift the depth to make the bin surface at 0
 
         rgb_patch = self.transform_rgb(rgb)
         depth_patch = self.transform_depth(depth)

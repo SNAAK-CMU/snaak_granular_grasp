@@ -9,14 +9,12 @@ from train import (
 from network import MassEstimationModel
 
 
-def unit_test_dataset():
-    transform_rgb = create_transform_rgb()
-    transform_depth = create_transform_depth()
+def unit_test_dataset(ingredient_name="lettuce"):
     dataset = GraspDataset(
-        data_dir="/home/parth/snaak/snaak_data/data_parth",
-        transform_rgb=transform_rgb,
-        transform_depth=transform_depth,
+        ingredient_name=ingredient_name,
+        data_dir=f"/home/parth/snaak/snaak_data/data_parth/{ingredient_name}",
     )
+    # print(f"Dataset length: {len(dataset)}")
     for i in range(len(dataset)):
         (rgb_patches, depth_patches), weight_label = dataset[i]
         # Assert the shapes of the rgb and depth patches
@@ -46,9 +44,10 @@ def unit_test_dataset():
     print("Dataset tested successfully!")
 
 
-def unit_test_dataloaders(batch_size=2):
+def unit_test_dataloaders(ingredient_name="lettuce", batch_size=2):
     train_loader, val_loader = create_train_val_dataloaders(
-        data_dir="/home/parth/snaak/snaak_data/data_parth",
+        ingredient_name=ingredient_name,
+        data_dir=f"/home/parth/snaak/snaak_data/data_parth/{ingredient_name}",
         batch_size=batch_size,
         shuffle=True,
         num_workers=2,
@@ -117,6 +116,6 @@ def unit_test_network():
 
 
 if __name__ == "__main__":
-    unit_test_dataset()
-    unit_test_dataloaders()
-    unit_test_network()
+    unit_test_dataset("onions")
+    unit_test_dataloaders("onions", batch_size=1)
+    # unit_test_network()
