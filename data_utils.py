@@ -63,7 +63,7 @@ CROP_COORDS_DICT = {
 
 GOOD_Z_BELOW_SURFACE_DICT = {
     "lettuce": 0.030,
-    "onions": 0.010,
+    "onions": 0.015,
 }
 
 # For filtering good grasps

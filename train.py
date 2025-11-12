@@ -223,8 +223,11 @@ def train_model(
     criterion = F.mse_loss
 
     # Learning rate scheduler
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=5, verbose=True
+    # scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+    #     optimizer, mode="min", factor=0.5, patience=5, verbose=True
+    # )
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=num_epochs, eta_min=0
     )
 
     # Track losses
@@ -250,7 +253,8 @@ def train_model(
         print(f"Validation Average Loss: {val_avg_loss:.4f}")
 
         # Update learning rate
-        scheduler.step(val_avg_loss)
+        # scheduler.step(val_avg_loss)
+        scheduler.step(epoch)
 
         # Store losses
         train_losses.append(train_avg_loss)
@@ -313,11 +317,12 @@ def main():
     Main training function.
     """
     # Configuration
-    data_dir = "/home/parth/snaak/snaak_data/data_parth"
-    base_dir = "/home/parth/snaak/projects/granular_grasp/runs"
-    run_name = "train_w50_run_8"
-    batch_size = 8
-    num_epochs = 100
+    ingredient_name = "onions"
+    data_dir = f"/home/parth/snaak/snaak_data/data_parth/{ingredient_name}"
+    base_dir = f"/home/parth/snaak/projects/granular_grasp/runs_{ingredient_name}"
+    run_name = "train_run_3"
+    batch_size = 11
+    num_epochs = 200
     learning_rate = 0.0005
 
     # Create run directory
@@ -330,7 +335,7 @@ def main():
     # Create data loader
     print("Creating data loader...")
     train_loader, val_loader = create_train_val_dataloaders(
-        data_dir, batch_size=batch_size
+        ingredient_name, data_dir, batch_size=batch_size
     )
     print(f"Train dataset size: {len(train_loader.dataset)} samples")
     print(f"Number of batches: {len(train_loader)}")
@@ -340,6 +345,7 @@ def main():
 
     # Save training configuration
     config = {
+        "ingredient_name": ingredient_name,
         "data_dir": data_dir,
         "batch_size": batch_size,
         "num_epochs": num_epochs,
@@ -371,7 +377,7 @@ def main():
     plot_training_curves(train_losses, val_losses, save_path=plot_path)
 
     # Save model
-    model_path = os.path.join(run_dir, "mass_estimation_model.pth")
+    model_path = os.path.join(run_dir, f"mass_estimation_model_{ingredient_name}.pth")
     save_model(model, model_path)
 
     # Save losses to JSON

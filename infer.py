@@ -9,17 +9,15 @@ from tqdm import tqdm
 from network import MassEstimationModel
 from train import create_train_val_dataloaders
 from data_utils import GraspDataset, create_transform_rgb, create_transform_depth
-from data_utils import CROP_XMIN, CROP_XMAX, CROP_YMIN, CROP_YMAX
 from data_utils import (
-    BIN_LENGTH_PIX,
-    BIN_WIDTH_PIX,
-    BIN_WIDTH_M,
-    BIN_LENGTH_M,
-    BIN_HEIGHT,
+    INGREDIENT2BIN_DICT,
+    CROP_COORDS_DICT,
+    BIN_DIMS_DICT,
+    rotate_image_clockwise,
     WINDOW_SIZE,
 )
 
-BIN_PADDING = 50
+BIN_PADDING = WINDOW_SIZE // 2
 DEBUG_PLOT = True
 
 
@@ -147,7 +145,12 @@ def run_inference_and_save_plots(
 
 
 def get_patches_from_image_and_depth_maps(
-    rgb_img, depth_img, n_patch_length=7, n_patch_width=5, bin_padding=50
+    ingredient_name,
+    rgb_img,
+    depth_img,
+    n_patch_length=7,
+    n_patch_width=5,
+    bin_padding=50,
 ):
     """
     Sample 7 points along the bin's length (x axis) and 5 points along the width (y axis),
@@ -158,14 +161,19 @@ def get_patches_from_image_and_depth_maps(
       - depth_img shape: (BIN_LENGTH_PIX, BIN_WIDTH_PIX), dtype=float32 or uint16.
     """
 
+    pick_bin_id = INGREDIENT2BIN_DICT[ingredient_name]["pick_id"]
+    bin_dims_dict = BIN_DIMS_DICT[pick_bin_id]
+    bin_length_pix = bin_dims_dict["length_pix"]
+    bin_width_pix = bin_dims_dict["width_pix"]
+
     assert rgb_img.shape == (
-        BIN_LENGTH_PIX,
-        BIN_WIDTH_PIX,
+        bin_length_pix,
+        bin_width_pix,
         3,
     ), f"RGB image shape is incorrect: {rgb_img.shape}"
     assert depth_img.shape == (
-        BIN_LENGTH_PIX,
-        BIN_WIDTH_PIX,
+        bin_length_pix,
+        bin_width_pix,
     ), f"Depth image shape is incorrect: {depth_img.shape}"
     assert (
         rgb_img.shape[0:2] == depth_img.shape[0:2]
@@ -174,8 +182,8 @@ def get_patches_from_image_and_depth_maps(
     # Compute coordinates for patch centers (y, x)
     # Length = rows (Y), Width = columns (X) in image patch
     padding = bin_padding
-    x_vals = np.linspace(padding, BIN_WIDTH_PIX - padding, n_patch_width)
-    y_vals = np.linspace(padding, BIN_LENGTH_PIX - padding, n_patch_length)
+    x_vals = np.linspace(padding, bin_width_pix - padding, n_patch_width)
+    y_vals = np.linspace(padding, bin_length_pix - padding, n_patch_length)
 
     # Convert to int and clamp within safe valid range
     x_vals = np.round(x_vals).astype(int)
@@ -223,21 +231,32 @@ def get_patches_from_image_and_depth_maps(
     return patches_rgb, patches_depth, centers
 
 
-def infer_on_bin(rgb_img, depth_img, model, transform_rgb, transform_depth, device):
+def infer_on_bin(
+    ingredient_name, rgb_img, depth_img, model, transform_rgb, transform_depth, device
+):
+
+    # Get the crop coordinates for the bin
+    pick_bin_id = INGREDIENT2BIN_DICT[ingredient_name]["pick_id"]
+    crop_coords_dict = CROP_COORDS_DICT[pick_bin_id]
+    crop_ymin = crop_coords_dict["ymin"]
+    crop_ymax = crop_coords_dict["ymax"]
+    crop_xmin = crop_coords_dict["xmin"]
+    crop_xmax = crop_coords_dict["xmax"]
+
     # Crop out the bin from the image and depth maps
-    rgb_img = rgb_img[CROP_YMIN:CROP_YMAX, CROP_XMIN:CROP_XMAX, :]
-    depth_img = depth_img[CROP_YMIN:CROP_YMAX, CROP_XMIN:CROP_XMAX]
+    rgb_img = rgb_img[crop_ymin:crop_ymax, crop_xmin:crop_xmax, :]
+    depth_img = depth_img[crop_ymin:crop_ymax, crop_xmin:crop_xmax]
 
     # Get patches from the image and depth maps
     patches_rgb, patches_depth, centers = get_patches_from_image_and_depth_maps(
-        rgb_img, depth_img, bin_padding=BIN_PADDING
+        ingredient_name, rgb_img, depth_img, bin_padding=BIN_PADDING
     )
 
-    # print("Got patches from the image and depth maps")
-    # print(f"Number of patches: {len(patches_rgb)}")
-    # print(f"Number of patches per row: {len(patches_rgb)}")
-    # print(f"Number of patches per column: {len(patches_rgb[0])}")
-    # print(f"Shape of each patch: {patches_rgb[0][0].shape}")
+    print("Got patches from the image and depth maps")
+    print(f"Number of patches: {len(patches_rgb)}")
+    print(f"Number of patches per row: {len(patches_rgb)}")
+    print(f"Number of patches per column: {len(patches_rgb[0])}")
+    print(f"Shape of each patch: {patches_rgb[0][0].shape}")
 
     # Run inference on the patches
     pred_weights = []
@@ -266,7 +285,7 @@ def infer_on_bin(rgb_img, depth_img, model, transform_rgb, transform_depth, devi
     pred_weights = np.array(pred_weights)
 
     if DEBUG_PLOT and False:
-        resize_factor = 2
+        resize_factor = 3
         rgb_img_for_viz = cv2.resize(
             rgb_img.copy(),
             fx=resize_factor,
@@ -297,11 +316,11 @@ def infer_on_bin(rgb_img, depth_img, model, transform_rgb, transform_depth, devi
                 # cv2.circle(rgb_img_for_viz, (x, y), 4, (0, 0, 255), -1)
                 cv2.putText(
                     rgb_img_for_viz,
-                    f"{pred_weight:.0f}",
+                    f"{pred_weight:.1f}",
                     (int(x), int(y)),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (255, 0, 0),
+                    0.75,
+                    (255, 255, 0),
                     2,
                 )
 
@@ -344,6 +363,7 @@ def calculate_loss(row_i, col_i, w_desired, pred_weights, lambda_neighbor=0.25):
 
 
 def get_xy_for_weight(
+    ingredient_name,
     w_desired,
     rgb_img,
     depth_img,
@@ -354,13 +374,21 @@ def get_xy_for_weight(
     save_path=None,
 ):
 
-    centers, pred_weights = infer_on_bin(
-        rgb_img, depth_img, model, transform_rgb, transform_depth, device
-    )
+    if ingredient_name == "onions":
+        rgb_img = cv2.rotate(rgb_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        rgb_img = rotate_image_clockwise(rgb_img, 2.5)
+        depth_img = cv2.rotate(depth_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        depth_img = rotate_image_clockwise(depth_img, 2.5)
 
-    # Crop out the bin from the image and depth maps
-    rgb_img = rgb_img[CROP_YMIN:CROP_YMAX, CROP_XMIN:CROP_XMAX, :]
-    depth_img = depth_img[CROP_YMIN:CROP_YMAX, CROP_XMIN:CROP_XMAX]
+    centers, pred_weights = infer_on_bin(
+        ingredient_name,
+        rgb_img,
+        depth_img,
+        model,
+        transform_rgb,
+        transform_depth,
+        device,
+    )
 
     # Calculate a score for each point on the grid based on the desired weight
     best_x, best_y, min_loss = 0, 0, float("inf")
@@ -376,6 +404,16 @@ def get_xy_for_weight(
     # print(f"Best x: {best_x}, Best y: {best_y}, Min loss: {min_loss}")
 
     if DEBUG_PLOT:
+        pick_bin_id = INGREDIENT2BIN_DICT[ingredient_name]["pick_id"]
+        crop_coords_dict = CROP_COORDS_DICT[pick_bin_id]
+        crop_ymin = crop_coords_dict["ymin"]
+        crop_ymax = crop_coords_dict["ymax"]
+        crop_xmin = crop_coords_dict["xmin"]
+        crop_xmax = crop_coords_dict["xmax"]
+        # Crop out the bin from the image and depth maps
+        rgb_img = rgb_img[crop_ymin:crop_ymax, crop_xmin:crop_xmax, :]
+        depth_img = depth_img[crop_ymin:crop_ymax, crop_xmin:crop_xmax]
+
         resize_factor = 2
         rgb_img_for_viz = cv2.resize(
             rgb_img.copy(),
@@ -484,64 +522,87 @@ def test_get_patches_from_image_and_depth_maps():
     get_patches_from_image_and_depth_maps(img, depth_map, bin_padding=BIN_PADDING)
 
 
-def test_infer_on_bin():
+def test_infer_on_bin(ingredient_name="onions"):
 
     # Load model
-    model_path = "/home/parth/snaak/projects/granular_grasp/runs/train_w50_run_7/mass_estimation_model.pth"
+    model_path = "/home/parth/snaak/projects/granular_grasp/runs_onions/train_run_3/mass_estimation_model_onions.pth"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = MassEstimationModel()
     model.load_state_dict(torch.load(model_path)["model_state_dict"])
     model.eval()
     model.to(device)
 
+    pick_bin_id = INGREDIENT2BIN_DICT[ingredient_name]["pick_id"]
+    cam2bin_dist_mm = BIN_DIMS_DICT[pick_bin_id]["cam2bin_dist_mm"]
+
     # Create transformation functions
     transform_rgb = create_transform_rgb()
-    transform_depth = create_transform_depth()
+    transform_depth = create_transform_depth(cam2bin_dist_mm)
 
     # Load image and depth map
-    img_path = "/home/parth/snaak/projects/granular_grasp/rgb_image.jpg"
+    img_path = "/home/parth/snaak/projects/granular_grasp/rgb_image_onions.jpg"
     img = cv2.imread(img_path)
-    depth_map = np.load("/home/parth/snaak/projects/granular_grasp/depth_map.npy")
+    depth_map = np.load(
+        "/home/parth/snaak/projects/granular_grasp/depth_map_onions.npy"
+    )
+
+    if ingredient_name == "onions":
+        img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        img = rotate_image_clockwise(img, 2.5)
+        depth_map = cv2.rotate(depth_map, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        depth_map = rotate_image_clockwise(depth_map, 2.5)
 
     # Run inference on the bin
-    infer_on_bin(img, depth_map, model, transform_rgb, transform_depth, device)
-
-
-def test_get_xy_for_weight():
-    # Load model
-    model_path = (
-        "/home/parth/snaak/projects/granular_grasp/best_run/mass_estimation_model.pth"
+    infer_on_bin(
+        ingredient_name, img, depth_map, model, transform_rgb, transform_depth, device
     )
+
+
+def test_get_xy_for_weight(ingredient_name="onions"):
+    # Load model
+    model_path = "/home/parth/snaak/projects/granular_grasp/runs_onions/train_run_1/mass_estimation_model_onions.pth"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = MassEstimationModel()
     model.load_state_dict(torch.load(model_path)["model_state_dict"])
     model.eval()
     model.to(device)
 
+    pick_bin_id = INGREDIENT2BIN_DICT[ingredient_name]["pick_id"]
+    cam2bin_dist_mm = BIN_DIMS_DICT[pick_bin_id]["cam2bin_dist_mm"]
+
     # Create transformation functions
     transform_rgb = create_transform_rgb()
-    transform_depth = create_transform_depth()
+    transform_depth = create_transform_depth(cam2bin_dist_mm)
 
     # Load image and depth map
-    img_path = "/home/parth/snaak/projects/granular_grasp/rgb_image.jpg"
+    img_path = "/home/parth/snaak/projects/granular_grasp/rgb_image_onions.jpg"
     img = cv2.imread(img_path)
-    depth_map = np.load("/home/parth/snaak/projects/granular_grasp/depth_map.npy")
+    depth_map = np.load(
+        "/home/parth/snaak/projects/granular_grasp/depth_map_onions.npy"
+    )
 
     best_x, best_y = get_xy_for_weight(
-        6, img, depth_map, model, device, transform_rgb, transform_depth
+        ingredient_name,
+        10.0,
+        img,
+        depth_map,
+        model,
+        device,
+        transform_rgb,
+        transform_depth,
     )
     print(f"Best x: {best_x}, Best y: {best_y}")
 
 
-def infer_on_extracted_data():
+def infer_on_extracted_data(ingredient_name="onions"):
     desired_weight = 10.0
-    rgb_save_dir = "/home/parth/snaak/snaak_data/extracted/rgb"
-    depth_save_dir = "/home/parth/snaak/snaak_data/extracted/depth"
-    output_save_dir = "/home/parth/snaak/snaak_data/extracted/inference"
-
-    model_path = (
-        "/home/parth/snaak/projects/granular_grasp/best_run/mass_estimation_model.pth"
+    rgb_save_dir = f"/home/parth/snaak/snaak_data/extracted/{ingredient_name}/rgb"
+    depth_save_dir = f"/home/parth/snaak/snaak_data/extracted/{ingredient_name}/depth"
+    output_save_dir = (
+        f"/home/parth/snaak/snaak_data/extracted/{ingredient_name}/inference"
     )
+
+    model_path = "/home/parth/snaak/projects/granular_grasp/runs_onions/train_run_3/mass_estimation_model_onions.pth"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = MassEstimationModel()
     model.load_state_dict(torch.load(model_path)["model_state_dict"])
@@ -549,8 +610,10 @@ def infer_on_extracted_data():
     model.to(device)
 
     # Create transformation functions
+    pick_bin_id = INGREDIENT2BIN_DICT[ingredient_name]["pick_id"]
+    cam2bin_dist_mm = BIN_DIMS_DICT[pick_bin_id]["cam2bin_dist_mm"]
     transform_rgb = create_transform_rgb()
-    transform_depth = create_transform_depth()
+    transform_depth = create_transform_depth(cam2bin_dist_mm)
 
     rgb_files = sorted(os.listdir(rgb_save_dir))
     depth_files = sorted(os.listdir(depth_save_dir))
@@ -562,6 +625,7 @@ def infer_on_extracted_data():
         depth = np.load(depth_path)
         save_path = os.path.join(output_save_dir, f"pred_{rgb_file}")
         best_x, best_y = get_xy_for_weight(
+            ingredient_name,
             desired_weight,
             rgb,
             depth,
@@ -574,4 +638,4 @@ def infer_on_extracted_data():
 
 
 if __name__ == "__main__":
-    infer_on_extracted_data()
+    infer_on_extracted_data("onions")
